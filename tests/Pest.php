@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
-use Mockery as M;
+/*
+|--------------------------------------------------------------------------
+| Pest Bootstrap
+|--------------------------------------------------------------------------
+*/
 
-afterEach(function () {
-    M::close();
-});
+require_once __DIR__ . '/../vendor/autoload.php';

@@ -1,11 +1,14 @@
 {
-    "name": "spora-ai/spora-plugin-skeleton",
-    "description": "Skeleton for Spora plugins — copy this repo to start a new one.",
+    "name": "spora-ai/spora-plugin-muse",
+    "description": "Meta Muse vendor home for Spora agents — speech-to-text (Muse Voice Transcribe) + image generation (Muse Image) today; future Muse Spark text, Muse Glimmer TTS, etc.",
     "type": "spora-plugin",
     "license": "MIT",
     "require": {
         "php": "^8.4.1",
-        "spora-ai/spora-core": "^0.12.0"
+        "spora-ai/spora-core": "dev-feat/speech-input-core-contract as 0.24.0",
+        "symfony/event-dispatcher": "^8.0",
+        "symfony/http-client": "^8.0",
+        "symfony/process": "^8.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.94",
@@ -16,17 +19,18 @@
     },
     "autoload": {
         "psr-4": {
-            "Spora\\Plugins\\Skeleton\\": "src/"
+            "Spora\\Plugins\\Muse\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Spora\\Plugins\\Skeleton\\Tests\\": "tests/"
+            "Spora\\Plugins\\Muse\\Tests\\": "tests/"
         }
     },
     "scripts": {
         "test": "pest",
-        "analyse": "phpstan analyse --no-progress",
+        "test:parallel": "pest --parallel --processes=auto --max-batch-size=50",
+        "analyse": "phpstan analyse --no-progress --memory-limit=2G",
         "lint": "php-cs-fixer fix --dry-run --diff --no-interaction"
     },
     "config": {
@@ -37,6 +41,10 @@
             "spora-ai/installer": true
         }
     },
-    "minimum-stability": "stable",
-    "prefer-stable": true
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "repositories": [{
+        "type": "vcs",
+        "url": "https://github.com/spora-ai/spora-core.git"
+    }]
 }
