@@ -1,0 +1,42 @@
+{
+    "name": "spora-ai/spora-plugin-skeleton",
+    "description": "Skeleton for Spora plugins — copy this repo to start a new one.",
+    "type": "spora-plugin",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4.1",
+        "spora-ai/spora-core": "^0.12.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.94",
+        "mockery/mockery": "^1.6",
+        "pestphp/pest": "^4.0",
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-mockery": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Spora\\Plugins\\Skeleton\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Spora\\Plugins\\Skeleton\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "analyse": "phpstan analyse --no-progress",
+        "lint": "php-cs-fixer fix --dry-run --diff --no-interaction"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "spora-ai/installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

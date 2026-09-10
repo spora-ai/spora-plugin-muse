@@ -1,0 +1,13 @@
+{
+    "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
+    "name": "spora-ai/spora-plugin-skeleton",
+    "slug": "skeleton",
+    "description": "Skeleton plugin — replace this with your plugin's description.",
+    "class": "Spora\\Plugins\\Skeleton\\SkeletonPlugin",
+    "icon": "puzzle",
+    "autoload": {
+        "psr-4": {
+            "Spora\\Plugins\\Skeleton\\": "src/"
+        }
+    }
+}
