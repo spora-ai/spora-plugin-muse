@@ -9,21 +9,41 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Thin, authenticated wrapper over Symfony's HttpClient for the Meta
- * Muse Image endpoint. Sends a conversational `POST /v1/responses`
- * with model `muse-image`; parses `output[]` for image blocks.
+ * Muse Image endpoint.
+ *
+ * Muse Image is exposed through Meta's OpenAI-compatible Chat Completions
+ * gateway: `POST https://api.meta.ai/v1/chat/completions` with
+ * `model: "muse-image"`. Image dimensions are passed via the
+ * Meta-specific `image_config` field (`{image_size: "1024x1024"|"1024x1536"|"1536x1024"}`).
+ *
+ * Wire shape — text-to-image:
+ * ```json
+ * {
+ *   "model": "muse-image",
+ *   "messages": [{"role": "user", "content": "a cat in a top hat"}],
+ *   "image_config": {"image_size": "1024x1024"}
+ * }
+ * ```
+ *
+ * Wire shape — image edit (reference images attached to the user
+ * message as `image_url` content parts, per OpenAI's edit convention).
+ * Meta does not document the edit wire shape directly; we follow the
+ * OpenAI / LLM Gateway convention so reference images land as
+ * `image_url` parts inside `messages[].content[]`.
+ *
+ * Response shape (per LLM Gateway docs, not directly verified in
+ * dev.meta.ai — see PR notes): `choices[0].message.images[]` carrying
+ * `{type: "image_url", image_url: {url: "data:image/png;base64,..."}}`.
  *
  * Single-shot: every failure surfaces to the caller so the LLM can adapt
  * on retry (smaller size, fewer reference images, raise timeout).
- *
- * Wire shape — VERIFY AT PR TIME against the live Responses API.
- * The Responses API is shared with Muse Spark text; the image content-part
- * discriminator (likely `type: "image"` with `image_base64` field, OR
- * `type: "output_image"`) needs confirmation when the PR opens.
  */
 final class MuseImageHttpClient
 {
-    private const ENDPOINT = 'https://api.meta.ai/v1/responses';
+    private const ENDPOINT = 'https://api.meta.ai/v1/chat/completions';
     private const MODEL = 'muse-image';
+    private const DEFAULT_SIZE = '1024x1024';
+    private const ALLOWED_SIZES = ['1024x1024', '1024x1536', '1536x1024'];
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
@@ -32,23 +52,24 @@ final class MuseImageHttpClient
     ) {}
 
     /**
-     * @param list<array<string, mixed>> $userContent
+     * @param list<array{role: string, content: string|list<array<string, mixed>>}> $messages
+     * @param array<string, mixed>|null $imageConfig
      * @return array<string, mixed>
      */
-    public function generate(array $userContent): array
+    public function chat(array $messages, ?array $imageConfig = null): array
     {
-        $body = [
-            'model' => self::MODEL,
-            'input' => [['role' => 'user', 'content' => $userContent]],
-        ];
+        $body = ['model' => self::MODEL, 'messages' => $messages];
+        if ($imageConfig !== null) {
+            $body['image_config'] = $imageConfig;
+        }
 
         try {
             $response = $this->httpClient->request('POST', self::ENDPOINT, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $this->apiKey,
-                    'Content-Type'  => 'application/json',
+                    'Content-Type' => 'application/json',
                 ],
-                'json'    => $body,
+                'json' => $body,
                 'timeout' => $this->timeoutSeconds,
             ]);
         } catch (TransportExceptionInterface $e) {
@@ -76,6 +97,17 @@ final class MuseImageHttpClient
         }
 
         return $decoded;
+    }
+
+    /**
+     * @return string one of the {@see ALLOWED_SIZES} entries
+     */
+    public static function normaliseSize(mixed $size): string
+    {
+        if (is_string($size) && in_array($size, self::ALLOWED_SIZES, true)) {
+            return $size;
+        }
+        return self::DEFAULT_SIZE;
     }
 
     /** @param mixed $decoded */

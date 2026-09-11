@@ -1,84 +1,73 @@
-# Spora Plugin Skeleton
+# spora-plugin-muse
 
-Skeleton for a [Spora](https://github.com/spora-ai/spora-core) plugin.
+Meta Muse vendor home for [Spora](https://github.com/spora-ai/spora) agents. v1 ships two capabilities sharing one Meta Model API key:
 
-Use this repository as a template for any new `spora-plugin`:
+- **Muse Voice Transcribe** (`muse-voice-transcribe-1.0`) — speech-to-text via `POST https://api.meta.ai/v1/asr/transcribe`. Browser audio containers (webm/opus, ogg/opus, mp4/AAC) are transcoded to mono 16-bit PCM WAV at 24 kHz via `ffmpeg`.
+- **Muse Image** (`muse-image`) — image generation + editing via Meta's Chat-Completions-compatible endpoint. Generate + edit operations, Media Archive ingest.
 
-1. Click **Use this template** → **Create a new repository** on GitHub.
-2. Rename the package in `composer.json` (e.g. `spora-ai/spora-plugin-tavily`).
-3. Rename the namespace (`Spora\Plugins\Skeleton` → `Spora\Plugins\<YourPlugin>`)
-   in every PHP file.
-4. Update `plugin.json`'s `slug`, `description`, `class`, and `icon`.
-5. Replace `src/Tools/EchoTool.php` with your real tool(s); add more files
-   under `src/Tools/` and list them in `src/SkeletonPlugin.php::tools()`.
-6. If your plugin needs database tables, add Laravel migrations under
-   `database/migrations/` and bump `SkeletonPlugin::schemaVersion()`.
+Future Muse capabilities (Spark text, Glimmer TTS, Muse Video) slot into this plugin as additional tools/providers — install once, get all Meta Muse capabilities.
 
-## Authoring guidelines
+## Installation
 
-Framework-level conventions — which classes are plugin-stable, what's
-framework-internal, schema versioning, deprecation policy — live in the
-[Spora docs → Plugin system](https://docs.spora-ai.com/reference/concepts/plugins-system).
-The driver / history value-object layer is **framework-internal**:
-route plugin logic through `AgentOrchestrator` and `TaskService`.
-
-> **Skills feature note.** The skeleton's `skillPaths()` override
-> requires `spora-core ≥ 0.12.0` at runtime (the `skillPaths()` hook
-> was added in v0.12). Older spora-core versions will throw a fatal
-> when the loader fails to resolve the missing method. The skeleton's
-> `composer.json` still requires `>=0.3.0 <1.0.0` for compatibility
-> with existing installations; plugin authors using the Skills
-> feature should pin to `^0.12`.
-
-## Layout
-
-```
-.
-├── composer.json          # name=spora-ai/spora-plugin-<x>, type=spora-plugin
-├── plugin.json            # manifest the PluginLoader reads at boot
-├── src/
-│   ├── SkeletonPlugin.php # PluginInterface implementation (FQCN matches plugin.json `class`)
-│   └── Tools/
-│       └── EchoTool.php   # one tool per file (replace this one)
-├── skills/                # skills shipped with the plugin (one folder per skill)
-├── agent-templates/       # agent-template files shipped with the plugin
-├── tests/                 # Pest unit tests
-│   ├── Pest.php
-│   └── Unit/
-└── .github/workflows/
-    └── ci.yml             # pest + phpstan + cs-fixer
+```bash
+php bin/spora plugin:install spora-plugin-muse
+php bin/spora spora:install
 ```
 
-`skills/` and `agent-templates/` are present in the template (with
-`.gitkeep`) so the directory references in `SkeletonPlugin::skillPaths()`
-and `SkeletonPlugin::agentTemplatePaths()` resolve out of the box.
-Plugin authors can leave them empty if the plugin ships none, or delete
-the methods in `SkeletonPlugin.php` to drop the hook entirely.
+## Requirements
 
-## Local development
+`ffmpeg` MUST be installed and on PATH (or set `ffmpeg_binary` to an absolute path) — the STT provider transcodes browser audio via Symfony Process. Image generation does NOT need ffmpeg.
 
-Clone the repo, install dependencies, and run the tests:
+```bash
+# Debian / Ubuntu
+sudo apt-get install -y ffmpeg
+
+# macOS
+brew install ffmpeg
+```
+
+## Configuration
+
+Settings → Tools → Muse. Cascade: agent → principal → global.
+
+| Setting                | Capability | Required | Default  | Notes |
+| ---------------------- | ---------- | -------- | -------- | ----- |
+| `api_key`              | both       | yes      | —        | Meta Model API key; one key serves all Muse capabilities. Generate at <https://dev.meta.ai> → API Keys. Encrypted at rest. |
+| `ffmpeg_binary`        | STT        | no       | `ffmpeg` | Absolute path to ffmpeg. |
+| `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
+| `language_bias`        | STT        | no       | (auto-detect) | Array of language names to bias toward (e.g. `["English", "French"]`). 25 validated languages. |
+| `keywords`             | STT        | no       | (none)   | Array of terms to bias recognition toward (product names, jargon). |
+| `http_timeout_seconds` | Image      | no       | 300      | Per-request timeout. |
+
+## Per-tool operations
+
+### `image_muse` — generate / edit
+
+| Action     | Description                                              | Parameters                                                            | Approval |
+| ---------- | -------------------------------------------------------- | --------------------------------------------------------------------- | -------- |
+| `generate` | One image from a text prompt.                            | `prompt` (string, required), `filename` (optional stem, no ext), `size` (default `1024x1024`) | no       |
+| `edit`     | Edit/compose from reference URLs/data URIs + prompt.      | `prompt` (string, required), `input_images` (array, required), `filename` (optional), `size` (default `1024x1024`) | yes |
+
+Pricing: $0.01/image flat. Image sizes: `1024x1024` (default), `1024x1536` (portrait), `1536x1024` (landscape).
+
+### STT (`muse-voice-transcribe-1.0`)
+
+Pricing: $0.18/hour of audio processed. 32 MB / 10 min file cap before ffmpeg runs.
+
+No LLM-callable surface — used internally when audio input is enabled on a Spora session. Picks the first provider that returns `isConfigured() === true`; configure one key globally and all sessions share it.
+
+## Development
 
 ```bash
 composer install
-./vendor/bin/pest
+composer analyse       # PHPStan
+composer test:parallel # Pest — ~22s (requires ffmpeg on PATH)
+composer lint          # php-cs-fixer dry-run
+composer format        # apply formatting
 ```
 
-## Publishing
+CI runs Pest on PHP 8.4 + 8.5, PHPStan, and php-cs-fixer dry-run, and installs `ffmpeg` via `apt-get` for the test job.
 
-1. Tag the release: `git tag v0.1.0 && git push --tags`.
-2. (Optional) Configure Packagist to auto-pull from the GitHub repo.
+---
 
-There's nothing to bump in `plugin.json` or `composer.json` — the runtime reads the version from the git tag via `Composer\InstalledVersions::getPrettyVersion()`, so the tag is the single source of truth.
-
-## CI
-
-Three parallel jobs run on every push to `main`, on `v*` tags, and on
-pull requests:
-
-- `test` — Pest on PHP 8.4 + 8.5
-- `static-analysis` — PHPStan level 5
-- `code-style` — php-cs-fixer dry-run (same ruleset as Spora core)
-
-External actions are pinned to full commit SHAs per the project's supply-chain
-policy.
+**Repo:** [spora-ai/spora-plugin-muse](https://github.com/spora-ai/spora-plugin-muse) · **MIT**
