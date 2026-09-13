@@ -10,6 +10,8 @@ use Spora\Speech\SpeechToTextException;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\TranscriptionResult;
 use Spora\Tools\Attributes\ToolSetting;
+use Symfony\Component\Process\Exception\ProcessStartFailedException;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -22,8 +24,9 @@ use Throwable;
  * PCM WAV at 16 or 24 kHz, up to 10 minutes / 32 MB. Browser recordings
  * (webm/opus, ogg/opus, mp4/AAC) must be transcoded before submission.
  * This provider shells out to ffmpeg via Symfony Process — operators
- * MUST have ffmpeg installed and on PATH (or set the `ffmpeg_binary`
- * setting to an absolute path).
+ * MUST have ffmpeg installed and on PATH, set the `ffmpeg_binary`
+ * ToolSetting, or export `SPORA_FFMPEG_BINARY` to an absolute path.
+ * Resolution order: ToolSetting > `SPORA_FFMPEG_BINARY` env > PATH.
  *
  * Wire shape (verified against the Meta API):
  *   - Request: `multipart/form-data` with a `request` part (JSON blob
@@ -114,9 +117,11 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
             throw new SpeechToTextException('Meta Model API key is not configured for this user.');
         }
 
-        $ffmpegBinary = is_string($settings['ffmpeg_binary'] ?? null) && trim($settings['ffmpeg_binary']) !== ''
-            ? trim($settings['ffmpeg_binary'])
-            : self::DEFAULT_FFMPEG;
+        $settingBinary = is_string($settings['ffmpeg_binary'] ?? null) ? trim($settings['ffmpeg_binary']) : '';
+        $envBinary = (string) ($_ENV['SPORA_FFMPEG_BINARY'] ?? (getenv('SPORA_FFMPEG_BINARY') ?: ''));
+        $ffmpegBinary = $settingBinary !== ''
+            ? $settingBinary
+            : ($envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG);
 
         $mode = $this->readMode($settings);
         $keywords = $this->readStringList($settings, 'keywords');
@@ -248,18 +253,32 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
         try {
             file_put_contents($in, $bytes);
 
-            $process = new Process([
-                $ffmpegBinary, '-y', '-loglevel', 'error',
-                '-i', $in,
-                '-ac', '1',
-                '-ar', '24000',
-                '-c:a', 'pcm_s16le',
-                '-map_metadata', '-1',
-                '-f', 'wav',
-                $path,
-            ]);
-            $process->setTimeout(30);
-            $process->run();
+            // Resolve via ExecutableFinder so the missing-binary error fires
+            // before we spawn a process — Symfony's `proc_open` on macOS
+            // returns a handle even for non-existent binaries (the failure
+            // surfaces only at exit as opaque stderr). For absolute paths
+            // ExecutableFinder still checks `is_executable()` so a misconfigured
+            // `ffmpeg_binary` ToolSetting fails the same way.
+            if ((new ExecutableFinder())->find($ffmpegBinary) === null) {
+                throw new SpeechToTextException($this->missingFfmpegMessage($ffmpegBinary));
+            }
+
+            try {
+                $process = new Process([
+                    $ffmpegBinary, '-y', '-loglevel', 'error',
+                    '-i', $in,
+                    '-ac', '1',
+                    '-ar', '24000',
+                    '-c:a', 'pcm_s16le',
+                    '-map_metadata', '-1',
+                    '-f', 'wav',
+                    $path,
+                ]);
+                $process->setTimeout(30);
+                $process->run();
+            } catch (ProcessStartFailedException $e) {
+                throw new SpeechToTextException($this->missingFfmpegMessage($ffmpegBinary), 0, $e);
+            }
 
             if (!$process->isSuccessful()) {
                 throw new InvalidAudioException('ffmpeg conversion to PCM WAV failed: ' . $process->getErrorOutput());
@@ -272,6 +291,16 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
         } finally {
             @unlink($in);
         }
+    }
+
+    private function missingFfmpegMessage(string $ffmpegBinary): string
+    {
+        return sprintf(
+            'ffmpeg binary not found at "%s". Install ffmpeg '
+            . '(apt-get install ffmpeg / brew install ffmpeg) or set the '
+            . '`ffmpeg_binary` ToolSetting / `SPORA_FFMPEG_BINARY` env var to an absolute path.',
+            $ffmpegBinary,
+        );
     }
 
     private function extensionFor(string $mimeType): string

@@ -16,7 +16,7 @@ php bin/spora spora:install
 
 ## Requirements
 
-`ffmpeg` MUST be installed and on PATH (or set `ffmpeg_binary` to an absolute path) — the STT provider transcodes browser audio via Symfony Process. Image generation does NOT need ffmpeg.
+`ffmpeg` MUST be installed and reachable by one of: on `$PATH` (default), set as the `ffmpeg_binary` ToolSetting, or exported as the `SPORA_FFMPEG_BINARY` env var. The STT provider transcodes browser audio via Symfony Process. `SPORA_FFMPEG_BINARY` resolves first when no ToolSetting is configured — useful for Docker / shared-host deployments. Image generation does NOT need ffmpeg.
 
 ```bash
 # Debian / Ubuntu
@@ -33,7 +33,8 @@ Settings → Tools → Muse. Cascade: agent → principal → global.
 | Setting                | Capability | Required | Default  | Notes |
 | ---------------------- | ---------- | -------- | -------- | ----- |
 | `api_key`              | both       | yes      | —        | Meta Model API key; one key serves all Muse capabilities. Generate at <https://dev.meta.ai> → API Keys. Encrypted at rest. |
-| `ffmpeg_binary`        | STT        | no       | `ffmpeg` | Absolute path to ffmpeg. |
+| `ffmpeg_binary`        | STT        | no       | `ffmpeg` | Absolute path to ffmpeg (per-agent / per-user). Wins over `SPORA_FFMPEG_BINARY`. |
+| `SPORA_FFMPEG_BINARY`  | STT        | no       | `ffmpeg` | Env var override for the ffmpeg binary path (deployment-level, e.g. Docker / shared hosts). Wins over PATH. |
 | `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
 | `language_bias`        | STT        | no       | (auto-detect) | Array of language names to bias toward (e.g. `["English", "French"]`). 25 validated languages. |
 | `keywords`             | STT        | no       | (none)   | Array of terms to bias recognition toward (product names, jargon). |
