@@ -215,6 +215,63 @@ test('keywords setting flows into the request blob', function (): void {
     expect($decoded['keywords'])->toBe(['Spora', 'Muse']);
 });
 
+test('language_bias setting accepts newline-separated textarea string', function (): void {
+    [$provider, $response] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test', 'language_bias' => "English\nFrench\n  German  \n\nSpanish"],
+        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+    );
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $options = $response->getRequestOptions();
+    $requestPart = null;
+    foreach ($options['multipart'] as $part) {
+        if (($part['name'] ?? null) === 'request') {
+            $requestPart = $part;
+        }
+    }
+    $decoded = json_decode((string) $requestPart['contents'], true);
+    expect($decoded['languageBias'])->toBe(['English', 'French', 'German', 'Spanish']);
+});
+
+test('language_bias setting normalises Windows / Mac line endings', function (): void {
+    [$provider, $response] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test', 'language_bias' => "English\r\nFrench\rGerman"],
+        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+    );
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $options = $response->getRequestOptions();
+    $requestPart = null;
+    foreach ($options['multipart'] as $part) {
+        if (($part['name'] ?? null) === 'request') {
+            $requestPart = $part;
+        }
+    }
+    $decoded = json_decode((string) $requestPart['contents'], true);
+    expect($decoded['languageBias'])->toBe(['English', 'French', 'German']);
+});
+
+test('keywords setting accepts comma-separated text string with whitespace', function (): void {
+    [$provider, $response] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test', 'keywords' => 'Spora, Muse , Sporadise ,  , '],
+        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+    );
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $options = $response->getRequestOptions();
+    $requestPart = null;
+    foreach ($options['multipart'] as $part) {
+        if (($part['name'] ?? null) === 'request') {
+            $requestPart = $part;
+        }
+    }
+    $decoded = json_decode((string) $requestPart['contents'], true);
+    expect($decoded['keywords'])->toBe(['Spora', 'Muse', 'Sporadise']);
+});
+
 test('empty transcript in response raises InvalidAudioException', function (): void {
     $provider = buildMuseProvider(['api_key' => 'sk-test'], json_encode(['transcript' => '']));
 

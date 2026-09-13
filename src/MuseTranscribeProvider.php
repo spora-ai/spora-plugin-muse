@@ -51,19 +51,23 @@ use Throwable;
     type: 'select',
     description: 'PUSH_TO_TALK (single-turn, default), ENDPOINTING (turn boundaries), or DIARIZATION (speaker labels).',
     default: 'PUSH_TO_TALK',
-    options: ['PUSH_TO_TALK', 'ENDPOINTING', 'DIARIZATION'],
+    options: [
+        'PUSH_TO_TALK' => 'PUSH_TO_TALK (single-turn, default)',
+        'ENDPOINTING' => 'ENDPOINTING (turn boundaries)',
+        'DIARIZATION'  => 'DIARIZATION (speaker labels)',
+    ],
 )]
 #[ToolSetting(
     key: 'language_bias',
     label: 'Language bias',
-    type: 'array',
-    description: 'Optional list of language names to bias recognition toward (e.g. ["English", "French"]).',
+    type: 'textarea',
+    description: 'One language per line. Biases recognition toward these languages (25 supported: Arabic, Bengali, Dutch, English, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malay, Mandarin Chinese, Marathi, Polish, Portuguese, Spanish, Tagalog, Tamil, Telugu, Thai, Turkish, Vietnamese).',
 )]
 #[ToolSetting(
     key: 'keywords',
     label: 'Keyword bias',
-    type: 'array',
-    description: 'Optional list of terms to bias recognition toward (product names, jargon).',
+    type: 'text',
+    description: 'Comma-separated list of terms to bias recognition toward (product names, jargon). e.g. Spora, Muse, Sporadise',
 )]
 final readonly class MuseTranscribeProvider implements SpeechToTextProviderInterface
 {
@@ -114,8 +118,8 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
         $ffmpegBinary = $envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG;
 
         $mode = $this->readMode($settings);
-        $keywords = $this->readStringList($settings, 'keywords');
-        $languageBias = $this->readStringList($settings, 'language_bias');
+        $keywords = $this->readStringList($settings, 'keywords', ',');
+        $languageBias = $this->readStringList($settings, 'language_bias', "\n");
 
         if (strlen($bytes) > self::MAX_BYTES) {
             throw new InvalidAudioException(sprintf(
@@ -189,14 +193,21 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
      * @param array<string, mixed> $settings
      * @return list<string>
      */
-    private function readStringList(array $settings, string $key): array
+    private function readStringList(array $settings, string $key, string $separator): array
     {
         $value = $settings[$key] ?? null;
-        if (!is_array($value)) {
+        if (is_array($value)) {
+            $candidates = $value;
+        } elseif (is_string($value)) {
+            // Normalize Windows / Mac line endings before splitting so textarea
+            // input and CLI / API callers round-trip identically regardless
+            // of the caller's line-break convention.
+            $candidates = explode($separator, str_replace(["\r\n", "\r"], "\n", $value));
+        } else {
             return [];
         }
         $out = [];
-        foreach ($value as $entry) {
+        foreach ($candidates as $entry) {
             if (is_string($entry)) {
                 $trimmed = trim($entry);
                 if ($trimmed !== '') {

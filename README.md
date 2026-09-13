@@ -34,9 +34,9 @@ Settings → Tools → Muse. Cascade: agent → principal → global.
 | ---------------------- | ---------- | -------- | -------- | ----- |
 | `api_key`              | both       | yes      | —        | Meta Model API key; one key serves all Muse capabilities. Generate at <https://dev.meta.ai> → API Keys. Encrypted at rest. |
 | `SPORA_FFMPEG_BINARY`  | STT        | no       | `ffmpeg` | Env var override for the ffmpeg binary path (deployment-level, e.g. Docker / shared hosts). Wins over PATH. |
-| `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
-| `language_bias`        | STT        | no       | (auto-detect) | Array of language names to bias toward (e.g. `["English", "French"]`). 25 validated languages. |
-| `keywords`             | STT        | no       | (none)   | Array of terms to bias recognition toward (product names, jargon). |
+| `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn, default), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
+| `language_bias`        | STT        | no       | (auto-detect) | One language per line (textarea). Biases recognition toward these languages (25 supported: Arabic, Bengali, Dutch, English, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malay, Mandarin Chinese, Marathi, Polish, Portuguese, Spanish, Tagalog, Tamil, Telugu, Thai, Turkish, Vietnamese). |
+| `keywords`             | STT        | no       | (none)   | Comma-separated list of terms to bias recognition toward (product names, jargon), e.g. `Spora, Muse, Sporadise`. |
 | `http_timeout_seconds` | Image      | no       | 300      | Per-request timeout. |
 
 ## Per-tool operations
