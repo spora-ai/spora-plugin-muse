@@ -196,6 +196,30 @@ test('language_bias setting is serialised as languageBias in the request blob', 
         ->and($decoded)->not->toHaveKey('language_bias');
 });
 
+test('language_bias setting decodes the JSON string the multi-select form posts', function (): void {
+    // The form posts a JSON-encoded array string; in production the
+    // framework decodes it via ToolConfigService::normalizeMultiSelectValues
+    // before the provider reads settings. We assert the defensive
+    // JSON-decode path so direct-API / unit-test callers that bypass
+    // the framework still see the right list.
+    [$provider, $response] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test', 'language_bias' => '["English","French","German"]'],
+        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+    );
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $options = $response->getRequestOptions();
+    $requestPart = null;
+    foreach ($options['multipart'] as $part) {
+        if (($part['name'] ?? null) === 'request') {
+            $requestPart = $part;
+        }
+    }
+    $decoded = json_decode((string) $requestPart['contents'], true);
+    expect($decoded['languageBias'])->toBe(['English', 'French', 'German']);
+});
+
 test('keywords setting flows into the request blob', function (): void {
     [$provider, $response] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'keywords' => ['Spora', 'Muse']],
@@ -213,44 +237,6 @@ test('keywords setting flows into the request blob', function (): void {
     }
     $decoded = json_decode((string) $requestPart['contents'], true);
     expect($decoded['keywords'])->toBe(['Spora', 'Muse']);
-});
-
-test('language_bias setting accepts newline-separated textarea string', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
-        ['api_key' => 'sk-test', 'language_bias' => "English\nFrench\n  German  \n\nSpanish"],
-        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
-    );
-
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
-
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
-    expect($decoded['languageBias'])->toBe(['English', 'French', 'German', 'Spanish']);
-});
-
-test('language_bias setting normalises Windows / Mac line endings', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
-        ['api_key' => 'sk-test', 'language_bias' => "English\r\nFrench\rGerman"],
-        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
-    );
-
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
-
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
-    expect($decoded['languageBias'])->toBe(['English', 'French', 'German']);
 });
 
 test('keywords setting accepts comma-separated text string with whitespace', function (): void {

@@ -60,8 +60,36 @@ use Throwable;
 #[ToolSetting(
     key: 'language_bias',
     label: 'Language bias',
-    type: 'textarea',
-    description: 'One language per line. Biases recognition toward these languages (25 supported: Arabic, Bengali, Dutch, English, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malay, Mandarin Chinese, Marathi, Polish, Portuguese, Spanish, Tagalog, Tamil, Telugu, Thai, Turkish, Vietnamese).',
+    type: 'multi-select',
+    description: 'Biases recognition toward the picked languages. Supports code-switching — pick every language a session may produce. Meta Muse supports 25 languages total.',
+    resolveAs: 'raw',
+    options: [
+        'English'           => 'English',
+        'Arabic'            => 'Arabic',
+        'Bengali'           => 'Bengali',
+        'Dutch'             => 'Dutch',
+        'French'            => 'French',
+        'German'            => 'German',
+        'Hebrew'            => 'Hebrew',
+        'Hindi'             => 'Hindi',
+        'Indonesian'        => 'Indonesian',
+        'Italian'           => 'Italian',
+        'Japanese'          => 'Japanese',
+        'Kannada'           => 'Kannada',
+        'Korean'            => 'Korean',
+        'Malay'             => 'Malay',
+        'Mandarin Chinese'  => 'Mandarin Chinese',
+        'Marathi'           => 'Marathi',
+        'Polish'            => 'Polish',
+        'Portuguese'        => 'Portuguese',
+        'Spanish'           => 'Spanish',
+        'Tagalog'           => 'Tagalog',
+        'Tamil'             => 'Tamil',
+        'Telugu'            => 'Telugu',
+        'Thai'              => 'Thai',
+        'Turkish'           => 'Turkish',
+        'Vietnamese'        => 'Vietnamese',
+    ],
 )]
 #[ToolSetting(
     key: 'keywords',
@@ -119,7 +147,13 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
 
         $mode = $this->readMode($settings);
         $keywords = $this->readStringList($settings, 'keywords', ',');
-        $languageBias = $this->readStringList($settings, 'language_bias', "\n");
+        // ToolConfigService::normalizeMultiSelectValues decodes the
+        // multi-select form's JSON string to an array before the provider
+        // reads settings. Mirror that path defensively so direct-API
+        // callers / unit tests that bypass the framework's normalization
+        // still see the right list (matches
+        // ToolConfigSchemaInspector::normalizeRawList's contract).
+        $languageBias = $this->normalizeRawList($settings['language_bias'] ?? null);
 
         if (strlen($bytes) > self::MAX_BYTES) {
             throw new InvalidAudioException(sprintf(
@@ -187,6 +221,39 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
             return self::DEFAULT_MODE;
         }
         return trim($mode);
+    }
+
+    /**
+     * Mirror {@see \Spora\Services\ToolConfigSchemaInspector::normalizeRawList()}:
+     * accept either a JSON-encoded array string (the raw form a multi-select
+     * form posts) or an already-decoded array, and return a flat list.
+     *
+     * Used as a safety net for direct-API callers / tests that bypass the
+     * framework's setting normalization; the provider's normal flow goes
+     * through {@see ToolConfigService::getEffectiveSettings()} which already
+     * decodes multi-select values.
+     *
+     * @return list<string>
+     */
+    private function normalizeRawList(mixed $value): array
+    {
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $entry) {
+            if (is_string($entry)) {
+                $trimmed = trim($entry);
+                if ($trimmed !== '') {
+                    $out[] = $trimmed;
+                }
+            }
+        }
+        return $out;
     }
 
     /**
