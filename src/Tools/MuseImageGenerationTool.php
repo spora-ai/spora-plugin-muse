@@ -32,6 +32,7 @@ use Throwable;
 #[ToolOperation(name: 'generate', description: 'Generate a single image from a text prompt. Always one image.', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'edit', description: 'Edit or compose an image from one or more reference images plus a prompt describing the desired change. Approval-gated by default — the LLM must ask the operator before issuing this call (writes reference-image bytes to Meta).', enabledByDefault: true, requiresApprovalByDefault: true)]
 #[ToolSetting(key: 'api_key', label: 'Meta Model API Key', type: 'password', description: 'One key serves all Meta Muse capabilities (STT + Image + future). Generate at https://dev.meta.ai → API Keys.', required: true)]
+#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Meta model identifier for image generation. Default `muse-image` (current). Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).', default: 'muse-image')]
 #[ToolSetting(key: 'http_timeout_seconds', label: 'HTTP timeout (s)', type: 'number', description: 'Per-request timeout. Default 300 seconds — Muse Image returns in ~5–20 s typically; raise if editing large reference images.', default: '300')]
 #[ToolParameter(name: 'prompt', type: 'string', description: 'The text prompt. Required for both `generate` and `edit`.', required: true, maximum: 32000)]
 #[ToolParameter(name: 'input_images', type: 'array', description: 'Reference images for `edit`. Each item is a URL string (http/https or data: URI). Only meaningful for `edit`.', required: false)]
@@ -40,6 +41,7 @@ use Throwable;
 final class MuseImageGenerationTool extends AbstractTool
 {
     private const DEFAULT_TIMEOUT_SECONDS = 300;
+    private const DEFAULT_MODEL = 'muse-image';
     private const MIME_FALLBACK = 'image/png';
 
     private ?LoggerInterface $logger;
@@ -185,7 +187,10 @@ final class MuseImageGenerationTool extends AbstractTool
         $timeout = is_numeric($settings['http_timeout_seconds'] ?? null) && (int) $settings['http_timeout_seconds'] > 0
             ? (int) $settings['http_timeout_seconds']
             : self::DEFAULT_TIMEOUT_SECONDS;
-        return new MuseImageHttpClient($this->httpClient, $apiKey, $timeout);
+        $model = is_string($settings['model'] ?? null) && trim($settings['model']) !== ''
+            ? trim($settings['model'])
+            : self::DEFAULT_MODEL;
+        return new MuseImageHttpClient($this->httpClient, $apiKey, $timeout, $model);
     }
 
     /**

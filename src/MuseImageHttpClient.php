@@ -13,8 +13,10 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *
  * Muse Image is exposed through Meta's OpenAI-compatible Chat Completions
  * gateway: `POST https://api.meta.ai/v1/chat/completions` with
- * `model: "muse-image"`. Image dimensions are passed via the
- * Meta-specific `image_config` field (`{image_size: "1024x1024"|"1024x1536"|"1536x1024"}`).
+ * `model: "muse-image"` by default (operator-overridable via the
+ * `model` ToolSetting on {@see Tools\MuseImageGenerationTool}).
+ * Image dimensions are passed via the Meta-specific `image_config` field
+ * (`{image_size: "1024x1024"|"1024x1536"|"1536x1024"}`).
  *
  * Wire shape — text-to-image:
  * ```json
@@ -41,7 +43,6 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class MuseImageHttpClient
 {
     private const ENDPOINT = 'https://api.meta.ai/v1/chat/completions';
-    private const MODEL = 'muse-image';
     private const DEFAULT_SIZE = '1024x1024';
     private const ALLOWED_SIZES = ['1024x1024', '1024x1536', '1536x1024'];
 
@@ -49,6 +50,7 @@ final class MuseImageHttpClient
         private readonly HttpClientInterface $httpClient,
         private readonly string $apiKey,
         private readonly int $timeoutSeconds,
+        private readonly string $model,
     ) {}
 
     /**
@@ -58,7 +60,7 @@ final class MuseImageHttpClient
      */
     public function chat(array $messages, ?array $imageConfig = null): array
     {
-        $body = ['model' => self::MODEL, 'messages' => $messages];
+        $body = ['model' => $this->model, 'messages' => $messages];
         if ($imageConfig !== null) {
             $body['image_config'] = $imageConfig;
         }

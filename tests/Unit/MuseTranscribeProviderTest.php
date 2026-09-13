@@ -175,6 +175,46 @@ test('request part is multipart with a JSON-encoded request blob and a file audi
     expect($headerBlob)->toContain('Authorization: Bearer sk-test');
 });
 
+test('model ToolSetting overrides the default in the request blob', function (): void {
+    [$provider, $response] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test', 'model' => 'muse-voice-transcribe-0.9'],
+        json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+    );
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $options = $response->getRequestOptions();
+    $requestPart = null;
+    foreach ($options['multipart'] as $part) {
+        if (($part['name'] ?? null) === 'request') {
+            $requestPart = $part;
+        }
+    }
+    $decoded = json_decode((string) $requestPart['contents'], true);
+    expect($decoded['model'])->toBe('muse-voice-transcribe-0.9');
+});
+
+test('empty / whitespace model setting falls back to the default model', function (): void {
+    foreach (['', '   '] as $empty) {
+        [$provider, $response] = buildMuseProviderWithResponse(
+            ['api_key' => 'sk-test', 'model' => $empty],
+            json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
+        );
+
+        $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+        $options = $response->getRequestOptions();
+        $requestPart = null;
+        foreach ($options['multipart'] as $part) {
+            if (($part['name'] ?? null) === 'request') {
+                $requestPart = $part;
+            }
+        }
+        $decoded = json_decode((string) $requestPart['contents'], true);
+        expect($decoded['model'])->toBe('muse-voice-transcribe-1.0');
+    }
+});
+
 test('language_bias setting is serialised as languageBias in the request blob', function (): void {
     [$provider, $response] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK', 'language_bias' => ['English', 'French']],

@@ -33,6 +33,8 @@ Settings → Tools → Muse. Cascade: agent → principal → global.
 | Setting                | Capability | Required | Default  | Notes |
 | ---------------------- | ---------- | -------- | -------- | ----- |
 | `api_key`              | both       | yes      | —        | Meta Model API key; one key serves all Muse capabilities. Generate at <https://dev.meta.ai> → API Keys. Encrypted at rest. |
+| `model` (STT)          | STT        | no       | `muse-voice-transcribe-1.0` | Meta model identifier for STT. Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.). |
+| `model` (Image)        | Image      | no       | `muse-image` | Meta model identifier for image generation. Same rollback / A-B rationale as the STT model. |
 | `SPORA_FFMPEG_BINARY`  | STT        | no       | `ffmpeg` | Env var override for the ffmpeg binary path (deployment-level, e.g. Docker / shared hosts). Wins over PATH. |
 | `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn, default), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
 | `language_bias`        | STT        | no       | (auto-detect) | Multi-select checkboxes. Biases recognition toward the picked languages (25 supported: Arabic, Bengali, Dutch, English, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malay, Mandarin Chinese, Marathi, Polish, Portuguese, Spanish, Tagalog, Tamil, Telugu, Thai, Turkish, Vietnamese). Pick multiple for code-switching sessions. |

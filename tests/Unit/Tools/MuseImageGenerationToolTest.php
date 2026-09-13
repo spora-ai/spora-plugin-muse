@@ -82,6 +82,56 @@ test('generate posts messages + image_config with the requested size to the Chat
         ->and($json['messages'][0]['content'])->toBe('a tall cat');
 });
 
+test('generate honours the model ToolSetting (operator-overridable model name)', function (): void {
+    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 16));
+    $body = json_encode([
+        'choices' => [[
+            'message' => [
+                'images' => [
+                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
+                ],
+            ],
+        ]],
+    ]);
+
+    // Operator picks a predecessor model Meta has shipped against the
+    // same API — e.g. rolling back after a bad `muse-image` release.
+    [$tool, $response] = buildImageTool($body, settings: [
+        'api_key' => 'sk-test',
+        'model'   => 'meta/muse-image-1.0',
+    ]);
+    $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+
+    $options = $response->getRequestOptions();
+    $json = json_decode((string) ($options['body'] ?? ''), true);
+    expect($json['model'])->toBe('meta/muse-image-1.0');
+});
+
+test('generate falls back to the default model when the setting is empty or whitespace', function (): void {
+    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 16));
+    $body = json_encode([
+        'choices' => [[
+            'message' => [
+                'images' => [
+                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
+                ],
+            ],
+        ]],
+    ]);
+
+    foreach (['', '   '] as $empty) {
+        [$tool, $response] = buildImageTool($body, settings: [
+            'api_key' => 'sk-test',
+            'model'   => $empty,
+        ]);
+        $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+
+        $options = $response->getRequestOptions();
+        $json = json_decode((string) ($options['body'] ?? ''), true);
+        expect($json['model'])->toBe('muse-image');
+    }
+});
+
 test('generate fails cleanly on empty prompt', function (): void {
     [$tool] = buildImageTool('{}');
     $result = $tool->execute(['action' => 'generate', 'prompt' => '   '], agentId: 1);

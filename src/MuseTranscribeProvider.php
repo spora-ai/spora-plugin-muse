@@ -46,6 +46,13 @@ use Throwable;
     description: 'Generate at https://dev.meta.ai → API Keys. One key serves all Meta Muse capabilities (STT + Image + future).',
 )]
 #[ToolSetting(
+    key: 'model',
+    label: 'Model',
+    type: 'text',
+    description: 'Meta model identifier for speech-to-text. Default `muse-voice-transcribe-1.0` (current). Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).',
+    default: 'muse-voice-transcribe-1.0',
+)]
+#[ToolSetting(
     key: 'mode',
     label: 'Transcription mode',
     type: 'select',
@@ -100,7 +107,7 @@ use Throwable;
 final readonly class MuseTranscribeProvider implements SpeechToTextProviderInterface
 {
     private const ENDPOINT = 'https://api.meta.ai/v1/asr/transcribe';
-    private const MODEL = 'muse-voice-transcribe-1.0';
+    private const DEFAULT_MODEL = 'muse-voice-transcribe-1.0';
     private const MAX_BYTES = 32 * 1024 * 1024;
     private const DEFAULT_FFMPEG = 'ffmpeg';
     private const DEFAULT_MODE = 'PUSH_TO_TALK';
@@ -146,6 +153,7 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
         $ffmpegBinary = $envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG;
 
         $mode = $this->readMode($settings);
+        $model = $this->readModel($settings);
         $keywords = $this->readStringList($settings, 'keywords', ',');
         // ToolConfigService::normalizeMultiSelectValues decodes the
         // multi-select form's JSON string to an array before the provider
@@ -170,7 +178,7 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
                     'multipart' => [
                         [
                             'name' => 'request',
-                            'contents' => $this->buildRequestPart($mode, $keywords, $languageBias),
+                            'contents' => $this->buildRequestPart($mode, $model, $keywords, $languageBias),
                             'content_type' => self::REQUEST_CONTENT_TYPE,
                         ],
                         [
@@ -221,6 +229,18 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
             return self::DEFAULT_MODE;
         }
         return trim($mode);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function readModel(array $settings): string
+    {
+        $model = $settings['model'] ?? null;
+        if (!is_string($model) || trim($model) === '') {
+            return self::DEFAULT_MODEL;
+        }
+        return trim($model);
     }
 
     /**
@@ -289,11 +309,11 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
      * @param list<string> $keywords
      * @param list<string> $languageBias
      */
-    private function buildRequestPart(string $mode, array $keywords, array $languageBias): string
+    private function buildRequestPart(string $mode, string $model, array $keywords, array $languageBias): string
     {
         $payload = [
             'mode' => $mode,
-            'model' => self::MODEL,
+            'model' => $model,
             'audioEncoding' => 'WAV',
         ];
         if ($languageBias !== []) {
