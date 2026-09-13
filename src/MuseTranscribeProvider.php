@@ -46,6 +46,13 @@ use Throwable;
     description: 'Generate at https://dev.meta.ai → API Keys. One key serves all Meta Muse capabilities (STT + Image + future).',
 )]
 #[ToolSetting(
+    key: 'display_name',
+    label: 'Display name',
+    type: 'text',
+    description: 'Operator-facing label surfaced in the recording-button gate, the speech provider config list, and the per-agent speech settings section. Default `Meta Muse Voice Transcribe`. Rename per-agent / per-user to disambiguate when several STT providers are configured.',
+    default: 'Meta Muse Voice Transcribe',
+)]
+#[ToolSetting(
     key: 'model',
     label: 'Model',
     type: 'text',
@@ -104,16 +111,25 @@ use Throwable;
     type: 'text',
     description: 'Comma-separated list of terms to bias recognition toward (product names, jargon). e.g. Spora, Muse, Sporadise',
 )]
-final readonly class MuseTranscribeProvider implements SpeechToTextProviderInterface
+final class MuseTranscribeProvider implements SpeechToTextProviderInterface
 {
     private const ENDPOINT = 'https://api.meta.ai/v1/asr/transcribe';
     private const DEFAULT_MODEL = 'muse-voice-transcribe-1.0';
+    private const DEFAULT_DISPLAY_NAME = 'Meta Muse Voice Transcribe';
     private const MAX_BYTES = 32 * 1024 * 1024;
     private const DEFAULT_FFMPEG = 'ffmpeg';
     private const DEFAULT_MODE = 'PUSH_TO_TALK';
     private const AUDIO_FILENAME = 'audio.wav';
     private const AUDIO_MIME = 'audio/wav';
     private const REQUEST_CONTENT_TYPE = 'application/json';
+
+    // Non-promoted runtime state — the registry rebinds this between
+    // describe() calls so multi-tenant requests don't bleed labels.
+    // PHP forbids re-assigning a readonly property outside the constructor,
+    // so the class is declared `final` (not `final readonly`) to allow
+    // bindLabel() to mutate this single field. Constructor-promoted
+    // dependencies below are still never reassigned.
+    private ?string $boundDisplayName = null;
 
     public function __construct(
         private HttpClientInterface $http,
@@ -127,7 +143,19 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
 
     public function getDisplayName(): string
     {
-        return 'Meta Muse Voice Transcribe';
+        return $this->boundDisplayName ?? self::DEFAULT_DISPLAY_NAME;
+    }
+
+    /**
+     * Cache the operator's per-config `display_name` ToolSetting. The
+     * registry calls this once per `describe()` invocation so subsequent
+     * {@see getDisplayName()} calls return the operator's label rather
+     * than the class-level default. Mirrors the pattern on
+     * {@see \Spora\Speech\OpenAiCompatibleTranscriber::bindLabel()}.
+     */
+    public function bindLabel(string $label): void
+    {
+        $this->boundDisplayName = $label;
     }
 
     public function isConfigured(): bool

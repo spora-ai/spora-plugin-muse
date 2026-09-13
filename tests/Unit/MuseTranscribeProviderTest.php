@@ -38,7 +38,28 @@ test('isConfigured() is optimistic', function (): void {
 
 test('getName / getDisplayName surface the Muse identity', function (): void {
     $provider = buildMuseProvider([]);
-    expect($provider->getName())->toBe('muse');
+    expect($provider->getName())->toBe('muse')
+        ->and($provider->getDisplayName())->toBe('Meta Muse Voice Transcribe');
+});
+
+test('bindLabel() overrides getDisplayName() until reset', function (): void {
+    // Mirrors what SpeechToTextRegistry::describeGeneric() does for any
+    // class-level provider that opts into the bindLabel() hook — the
+    // resolved effective `display_name` ToolSetting is bound before
+    // getDisplayName() is read.
+    $provider = buildMuseProvider([]);
+    $provider->bindLabel('Agent Muse Voice');
+    expect($provider->getDisplayName())->toBe('Agent Muse Voice');
+
+    // bindLabel() can rebind on every describe() call without leaking
+    // across instances — the registry relies on this for multi-tenant
+    // safety (one provider instance serves all requests).
+    $provider->bindLabel('Group Muse Voice');
+    expect($provider->getDisplayName())->toBe('Group Muse Voice');
+});
+
+test('getDisplayName() falls back to the class default when bindLabel() never fires', function (): void {
+    $provider = buildMuseProvider([]);
     expect($provider->getDisplayName())->toBe('Meta Muse Voice Transcribe');
 });
 
