@@ -241,32 +241,17 @@ afterEach(function (): void {
     unset($_ENV['SPORA_FFMPEG_BINARY']);
 });
 
-test('ffmpeg_binary ToolSetting wins over SPORA_FFMPEG_BINARY env var', function (): void {
-    $_ENV['SPORA_FFMPEG_BINARY'] = '/path/from/env';
-    putenv('SPORA_FFMPEG_BINARY=/path/from/env');
-
-    $provider = buildMuseProvider([
-        'api_key' => 'sk-test',
-        'ffmpeg_binary' => '/path/from/setting',
-    ]);
-
-    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
-        ->toThrow(SpeechToTextException::class, '/path/from/setting');
-});
-
-test('SPORA_FFMPEG_BINARY env var wins over bare "ffmpeg" PATH default', function (): void {
+test('SPORA_FFMPEG_BINARY env var wins over bare "ffmpeg" PATH default and surfaces actionable error', function (): void {
     $_ENV['SPORA_FFMPEG_BINARY'] = '/spora/muse/test/missing-ffmpeg';
     putenv('SPORA_FFMPEG_BINARY=/spora/muse/test/missing-ffmpeg');
 
     $provider = buildMuseProvider(['api_key' => 'sk-test']);
 
     expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
-        ->toThrow(SpeechToTextException::class)
-        ->and(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
         ->toThrow(
             SpeechToTextException::class,
             'ffmpeg binary not found at "/spora/muse/test/missing-ffmpeg". Install ffmpeg '
-            . '(apt-get install ffmpeg / brew install ffmpeg) or set the '
-            . '`ffmpeg_binary` ToolSetting / `SPORA_FFMPEG_BINARY` env var to an absolute path.',
+            . '(apt-get install ffmpeg / brew install ffmpeg) or export the '
+            . '`SPORA_FFMPEG_BINARY` env var to an absolute path.',
         );
 });

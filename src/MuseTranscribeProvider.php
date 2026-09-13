@@ -23,10 +23,9 @@ use Throwable;
  * Meta's batch endpoint only accepts mono 16-bit signed little-endian
  * PCM WAV at 16 or 24 kHz, up to 10 minutes / 32 MB. Browser recordings
  * (webm/opus, ogg/opus, mp4/AAC) must be transcoded before submission.
- * This provider shells out to ffmpeg via Symfony Process — operators
- * MUST have ffmpeg installed and on PATH, set the `ffmpeg_binary`
- * ToolSetting, or export `SPORA_FFMPEG_BINARY` to an absolute path.
- * Resolution order: ToolSetting > `SPORA_FFMPEG_BINARY` env > PATH.
+ * This provider shells out to ffmpeg via Symfony Process. Operators
+ * MUST either install ffmpeg on `$PATH` or export `SPORA_FFMPEG_BINARY`
+ * to an absolute path. Resolution order: `SPORA_FFMPEG_BINARY` env > PATH.
  *
  * Wire shape (verified against the Meta API):
  *   - Request: `multipart/form-data` with a `request` part (JSON blob
@@ -45,12 +44,6 @@ use Throwable;
     type: 'password',
     required: true,
     description: 'Generate at https://dev.meta.ai → API Keys. One key serves all Meta Muse capabilities (STT + Image + future).',
-)]
-#[ToolSetting(
-    key: 'ffmpeg_binary',
-    label: 'ffmpeg binary path',
-    type: 'text',
-    description: 'Absolute path to ffmpeg. Defaults to "ffmpeg" on PATH.',
 )]
 #[ToolSetting(
     key: 'mode',
@@ -117,11 +110,8 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
             throw new SpeechToTextException('Meta Model API key is not configured for this user.');
         }
 
-        $settingBinary = is_string($settings['ffmpeg_binary'] ?? null) ? trim($settings['ffmpeg_binary']) : '';
         $envBinary = (string) ($_ENV['SPORA_FFMPEG_BINARY'] ?? (getenv('SPORA_FFMPEG_BINARY') ?: ''));
-        $ffmpegBinary = $settingBinary !== ''
-            ? $settingBinary
-            : ($envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG);
+        $ffmpegBinary = $envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG;
 
         $mode = $this->readMode($settings);
         $keywords = $this->readStringList($settings, 'keywords');
@@ -254,11 +244,13 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
             file_put_contents($in, $bytes);
 
             // Resolve via ExecutableFinder so the missing-binary error fires
-            // before we spawn a process — Symfony's `proc_open` on macOS
-            // returns a handle even for non-existent binaries (the failure
-            // surfaces only at exit as opaque stderr). For absolute paths
-            // ExecutableFinder still checks `is_executable()` so a misconfigured
-            // `ffmpeg_binary` ToolSetting fails the same way.
+            // before we spawn a process — Symfony's `proc_open` on macOS may
+            // return a handle even for non-existent binaries (the failure
+            // surfaces only at exit as opaque stderr, since Symfony's own
+            // fallback at vendor/symfony/process/Process.php retries with
+            // `exec <shell-command>` and still succeeds). ExecutableFinder
+            // short-circuits this for both bare names on PATH and absolute
+            // paths from `SPORA_FFMPEG_BINARY`.
             if ((new ExecutableFinder())->find($ffmpegBinary) === null) {
                 throw new SpeechToTextException($this->missingFfmpegMessage($ffmpegBinary));
             }
@@ -297,8 +289,8 @@ final readonly class MuseTranscribeProvider implements SpeechToTextProviderInter
     {
         return sprintf(
             'ffmpeg binary not found at "%s". Install ffmpeg '
-            . '(apt-get install ffmpeg / brew install ffmpeg) or set the '
-            . '`ffmpeg_binary` ToolSetting / `SPORA_FFMPEG_BINARY` env var to an absolute path.',
+            . '(apt-get install ffmpeg / brew install ffmpeg) or export the '
+            . '`SPORA_FFMPEG_BINARY` env var to an absolute path.',
             $ffmpegBinary,
         );
     }
