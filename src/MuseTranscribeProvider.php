@@ -119,9 +119,6 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
     private const MAX_BYTES = 32 * 1024 * 1024;
     private const DEFAULT_FFMPEG = 'ffmpeg';
     private const DEFAULT_MODE = 'PUSH_TO_TALK';
-    private const AUDIO_FILENAME = 'audio.wav';
-    private const AUDIO_MIME = 'audio/wav';
-    private const REQUEST_CONTENT_TYPE = 'application/json';
 
     // Non-promoted runtime state — the registry rebinds this between
     // describe() calls so multi-tenant requests don't bleed labels.
@@ -200,27 +197,34 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
 
         $wavPath = $this->convertToWavPcm16($bytes, $mimeType, $ffmpegBinary);
         try {
+            // Symfony's HttpClient does NOT accept a `multipart` option;
+            // it auto-flips to `multipart/form-data` when any value in
+            // `body` is a PHP resource (HttpClientTrait::normalizeBody).
+            // Pass the WAV file as a resource and the JSON request blob
+            // as a plain string — Symfony serialises both correctly. The
+            // basename of the file stream becomes the multipart filename
+            // (no need to set it explicitly; Meta's API reads the bytes,
+            // not the filename).
+            $audioStream = fopen($wavPath, 'rb');
+            if ($audioStream === false) {
+                throw new SpeechToTextException("Could not open WAV file at {$wavPath} for upload.");
+            }
             try {
                 $response = $this->http->request('POST', self::ENDPOINT, [
                     'headers' => ['Authorization' => 'Bearer ' . $apiKey],
-                    'multipart' => [
-                        [
-                            'name' => 'request',
-                            'contents' => $this->buildRequestPart($mode, $model, $keywords, $languageBias),
-                            'content_type' => self::REQUEST_CONTENT_TYPE,
-                        ],
-                        [
-                            'name' => 'audio',
-                            'contents' => fopen($wavPath, 'rb'),
-                            'filename' => self::AUDIO_FILENAME,
-                            'content_type' => self::AUDIO_MIME,
-                        ],
+                    'body' => [
+                        'request' => $this->buildRequestPart($mode, $model, $keywords, $languageBias),
+                        'audio'   => $audioStream,
                     ],
                     'timeout' => 60,
                 ]);
                 $payload = $response->toArray();
             } catch (Throwable $e) {
                 throw new SpeechToTextException('Muse STT request failed: ' . $e->getMessage(), 0, $e);
+            } finally {
+                if (is_resource($audioStream)) {
+                    fclose($audioStream);
+                }
             }
         } finally {
             @unlink($wavPath);

@@ -8,18 +8,51 @@ use Spora\Speech\InvalidAudioException;
 use Spora\Speech\SpeechToTextException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
+use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
-function buildMuseProvider(array $settings, string $body = '{}', int $status = 200): MuseTranscribeProvider
+/**
+ * Test-only HttpClient that captures the request body BEFORE Symfony's
+ * `prepareRequest()` normalises it. Mirrors `OaiCapturingHttpClient` in
+ * spora-core's test suite. We need the raw assoc-array body to assert
+ * on field shape — after the multipart→body fix, Symfony wraps multipart
+ * bodies in a generator Closure, which we don't want to assert against.
+ */
+final class MuseCapturingHttpClient implements HttpClientInterface
 {
-    $config = Mockery::mock(ToolConfigService::class);
-    $config->shouldReceive('getEffectiveSettings')->andReturn($settings);
+    public mixed $capturedBody = null;
+    /** @var array<string, mixed> */
+    public array $capturedHeaders = [];
+    public ?string $capturedUrl = null;
+    public ?string $capturedMethod = null;
 
-    $mock = new MockHttpClient([new MockResponse($body, ['http_code' => $status])]);
-    return new MuseTranscribeProvider($mock, $config);
+    public function __construct(private HttpClientInterface $inner) {}
+
+    public function request(string $method, string $url, array $options = []): ResponseInterface
+    {
+        $this->capturedBody    = $options['body'] ?? null;
+        $this->capturedHeaders = $options['headers'] ?? [];
+        $this->capturedUrl     = $url;
+        $this->capturedMethod  = $method;
+        return $this->inner->request($method, $url, $options);
+    }
+
+    public function stream(ResponseInterface|iterable $responses, ?float $timeout = null): ResponseStreamInterface
+    {
+        return $this->inner->stream($responses, $timeout);
+    }
+
+    public function withOptions(array $options): static
+    {
+        $clone = clone $this;
+        $clone->inner = $this->inner->withOptions($options);
+        return $clone;
+    }
 }
 
 /**
- * @return array{0: MuseTranscribeProvider, 1: MockResponse}
+ * @return array{0: MuseTranscribeProvider, 1: MuseCapturingHttpClient, 2: MockResponse}
  */
 function buildMuseProviderWithResponse(array $settings, string $body = '{}', int $status = 200): array
 {
@@ -28,7 +61,14 @@ function buildMuseProviderWithResponse(array $settings, string $body = '{}', int
 
     $response = new MockResponse($body, ['http_code' => $status]);
     $mock = new MockHttpClient([$response]);
-    return [new MuseTranscribeProvider($mock, $config), $response];
+    $capturing = new MuseCapturingHttpClient($mock);
+    return [new MuseTranscribeProvider($capturing, $config), $capturing, $response];
+}
+
+function buildMuseProvider(array $settings, string $body = '{}', int $status = 200): MuseTranscribeProvider
+{
+    [$provider] = buildMuseProviderWithResponse($settings, $body, $status);
+    return $provider;
 }
 
 test('isConfigured() is optimistic', function (): void {
@@ -99,7 +139,7 @@ function tinySilenceWav(): string
 }
 
 test('happy path parses transcript + audioDurationMs + session_id from Meta wire shape', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK'],
         json_encode([
             'sessionId' => '9f1c-abc',
@@ -118,8 +158,8 @@ test('happy path parses transcript + audioDurationMs + session_id from Meta wire
         ->and($result->metadata['mode'])->toBe('PUSH_TO_TALK')
         ->and($result->metadata['turns'])->toBe([]);
 
-    expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/asr/transcribe')
-        ->and($response->getRequestMethod())->toBe('POST');
+    expect($capturing->capturedUrl)->toBe('https://api.meta.ai/v1/asr/transcribe')
+        ->and($capturing->capturedMethod)->toBe('POST');
 });
 
 test('DIARIZATION mode surfaces turns[] in metadata', function (): void {
@@ -144,8 +184,13 @@ test('DIARIZATION mode surfaces turns[] in metadata', function (): void {
         ->and($result->metadata['turns'][1]['speaker'])->toBe('B');
 });
 
-test('request part is multipart with a JSON-encoded request blob and a file audio part', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+test('body contains a request blob + audio resource, headers carry Bearer', function (): void {
+    // Symfony HttpClient flips `body` to `multipart/form-data` when any
+    // value is a PHP resource. The plugin encodes the JSON blob as a
+    // plain string field and opens the WAV temp file as a stream —
+    // mirroring the OpenAI-compatible transcriber's pattern (see
+    // spora-core/app/Speech/OpenAiCompatibleTranscriber.php:295).
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK'],
         json_encode([
             'sessionId' => '9f1c-abc',
@@ -157,102 +202,72 @@ test('request part is multipart with a JSON-encoded request blob and a file audi
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $multipart = $options['multipart'] ?? null;
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $body = $options['body'] ?? null;
 
-    expect($multipart)->toBeArray()
-        ->and($multipart)->toHaveCount(2);
+    expect($body)->toBeArray()
+        ->and($body)->toHaveKeys(['request', 'audio']);
 
-    $requestPart = null;
-    $audioPart = null;
-    foreach ($multipart as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-        if (($part['name'] ?? null) === 'audio') {
-            $audioPart = $part;
-        }
-    }
-
-    expect($requestPart)->not->toBeNull()
-        ->and($requestPart['content_type'] ?? null)->toBe('application/json');
-
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    // Request blob: a JSON-encoded string (NOT multipart-shaped — Symfony
+    // serialises a scalar as a plain form-data text part).
+    expect($body['request'])->toBeString();
+    $decoded = json_decode((string) $body['request'], true);
     expect($decoded)->toBe([
         'mode' => 'PUSH_TO_TALK',
         'model' => 'muse-voice-transcribe-1.0',
         'audioEncoding' => 'WAV',
     ]);
 
-    expect($audioPart)->not->toBeNull()
-        ->and($audioPart['filename'] ?? null)->toBe('audio.wav')
-        ->and($audioPart['content_type'] ?? null)->toBe('audio/wav')
-        ->and($audioPart['contents'])->toBeResource();
+    // Audio part: a PHP stream resource (Symfony picks the filename
+    // from the stream's URI basename; Meta's API reads the bytes, not
+    // the filename, so we don't pin the exact value).
+    expect($body['audio'])->toBeResource();
 
-    // Symfony HttpClient stores normalized headers as a numerically-indexed
-    // list of "Header-Name: value" strings (after array_merge flattens the
-    // per-header arrays). Assert via substring to keep the test stable.
-    $headerBlob = implode("\n", array_map('strval', $options['headers']));
-    expect($headerBlob)->toContain('Authorization: Bearer sk-test');
+    // The capturing client preserves the original assoc-array header
+    // shape (Symfony normalises it to a list of "Header-Name: value"
+    // strings internally, but we capture before that step).
+    expect($options['headers'])->toHaveKey('Authorization')
+        ->and($options['headers']['Authorization'])->toBe('Bearer sk-test');
 });
 
 test('model ToolSetting overrides the default in the request blob', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'model' => 'muse-voice-transcribe-0.9'],
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
     expect($decoded['model'])->toBe('muse-voice-transcribe-0.9');
 });
 
 test('empty / whitespace model setting falls back to the default model', function (): void {
     foreach (['', '   '] as $empty) {
-        [$provider, $response] = buildMuseProviderWithResponse(
+        [$provider, $capturing] = buildMuseProviderWithResponse(
             ['api_key' => 'sk-test', 'model' => $empty],
             json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
         );
 
         $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-        $options = $response->getRequestOptions();
-        $requestPart = null;
-        foreach ($options['multipart'] as $part) {
-            if (($part['name'] ?? null) === 'request') {
-                $requestPart = $part;
-            }
-        }
-        $decoded = json_decode((string) $requestPart['contents'], true);
+        $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+        $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
         expect($decoded['model'])->toBe('muse-voice-transcribe-1.0');
     }
 });
 
 test('language_bias setting is serialised as languageBias in the request blob', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK', 'language_bias' => ['English', 'French']],
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
     expect($decoded['languageBias'])->toBe(['English', 'French'])
         ->and($decoded)->not->toHaveKey('language_bias');
 });
@@ -263,59 +278,41 @@ test('language_bias setting decodes the JSON string the multi-select form posts'
     // before the provider reads settings. We assert the defensive
     // JSON-decode path so direct-API / unit-test callers that bypass
     // the framework still see the right list.
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'language_bias' => '["English","French","German"]'],
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
     expect($decoded['languageBias'])->toBe(['English', 'French', 'German']);
 });
 
 test('keywords setting flows into the request blob', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'keywords' => ['Spora', 'Muse']],
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
     expect($decoded['keywords'])->toBe(['Spora', 'Muse']);
 });
 
 test('keywords setting accepts comma-separated text string with whitespace', function (): void {
-    [$provider, $response] = buildMuseProviderWithResponse(
+    [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'keywords' => 'Spora, Muse , Sporadise ,  , '],
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
     $provider->transcribe(tinySilenceWav(), 'audio/wav');
 
-    $options = $response->getRequestOptions();
-    $requestPart = null;
-    foreach ($options['multipart'] as $part) {
-        if (($part['name'] ?? null) === 'request') {
-            $requestPart = $part;
-        }
-    }
-    $decoded = json_decode((string) $requestPart['contents'], true);
+    $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
+    $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
     expect($decoded['keywords'])->toBe(['Spora', 'Muse', 'Sporadise']);
 });
 
