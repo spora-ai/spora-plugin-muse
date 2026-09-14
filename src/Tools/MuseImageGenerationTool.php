@@ -32,7 +32,7 @@ use Throwable;
 #[ToolOperation(name: 'generate', description: 'Generate a single image from a text prompt. Always one image.', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'edit', description: 'Edit or compose an image from one or more reference images plus a prompt describing the desired change. Approval-gated by default — the LLM must ask the operator before issuing this call (writes reference-image bytes to Meta).', enabledByDefault: true, requiresApprovalByDefault: true)]
 #[ToolSetting(key: 'api_key', label: 'Meta Model API Key', type: 'password', description: 'One key serves all Meta Muse capabilities (STT + Image + future). Generate at https://dev.meta.ai → API Keys.', required: true)]
-#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Meta model identifier for image generation. Default `muse-image` (current). Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).', default: 'muse-image')]
+#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Meta model identifier for image generation. Default `muse-image-1.0`. Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).', default: 'muse-image-1.0')]
 #[ToolSetting(key: 'http_timeout_seconds', label: 'HTTP timeout (s)', type: 'number', description: 'Per-request timeout. Default 300 seconds — Muse Image returns in ~5–20 s typically; raise if editing large reference images.', default: '300')]
 #[ToolParameter(name: 'prompt', type: 'string', description: 'The text prompt. Required for both `generate` and `edit`.', required: true, maximum: 32000)]
 #[ToolParameter(name: 'input_images', type: 'array', description: 'Reference images for `edit`. Each item is a URL string (http/https or data: URI). Only meaningful for `edit`.', required: false)]
@@ -41,7 +41,7 @@ use Throwable;
 final class MuseImageGenerationTool extends AbstractTool
 {
     private const DEFAULT_TIMEOUT_SECONDS = 300;
-    private const DEFAULT_MODEL = 'muse-image';
+    private const DEFAULT_MODEL = 'muse-image-1.0';
     private const MIME_FALLBACK = 'image/png';
 
     private ?LoggerInterface $logger;
@@ -108,10 +108,7 @@ final class MuseImageGenerationTool extends AbstractTool
         $size = MuseImageHttpClient::normaliseSize($arguments['size'] ?? null);
 
         try {
-            $response = $client->chat(
-                [['role' => 'user', 'content' => $prompt]],
-                ['image_size' => $size],
-            );
+            $response = $client->generate($prompt, $size);
         } catch (MuseImageException $e) {
             $this->logger?->error('muse-image.generate failed', ['exception' => $e]);
             return new ToolResult(false, 'Image generation failed: ' . $e->getMessage());
@@ -130,6 +127,17 @@ final class MuseImageGenerationTool extends AbstractTool
             return new ToolResult(false, 'edit requires both `prompt` and at least one `input_images` entry.');
         }
 
+        $imageUrls = [];
+        foreach ($inputImages as $resolved) {
+            if (!is_string($resolved) || trim($resolved) === '') {
+                continue;
+            }
+            $imageUrls[] = $resolved;
+        }
+        if ($imageUrls === []) {
+            return new ToolResult(false, 'edit requires at least one non-empty `input_images` entry.');
+        }
+
         $client = $this->resolveClient($agentId, $ownerId);
         if ($client instanceof ToolResult) {
             return $client;
@@ -137,19 +145,8 @@ final class MuseImageGenerationTool extends AbstractTool
 
         $size = MuseImageHttpClient::normaliseSize($arguments['size'] ?? null);
 
-        $contentParts = [['type' => 'text', 'text' => $prompt]];
-        foreach ($inputImages as $resolved) {
-            if (!is_string($resolved) || $resolved === '') {
-                continue;
-            }
-            $contentParts[] = $this->contentPartForImage($resolved);
-        }
-
         try {
-            $response = $client->chat(
-                [['role' => 'user', 'content' => $contentParts]],
-                ['image_size' => $size],
-            );
+            $response = $client->edit($prompt, $imageUrls, $size);
         } catch (MuseImageException $e) {
             $this->logger?->error('muse-image.edit failed', ['exception' => $e]);
             return new ToolResult(false, 'Image edit failed: ' . $e->getMessage());
@@ -159,22 +156,8 @@ final class MuseImageGenerationTool extends AbstractTool
     }
 
     /**
-     * Build an OpenAI-style image content part for the edit message.
-     * Reference URLs travel as `image_url` parts (HTTP(S) or data: URIs);
-     * Meta's edit wire shape isn't directly documented in dev.meta.ai
-     * (those pages 500), so we follow the OpenAI / LLM Gateway edit
-     * convention documented at docs.llmgateway.io/features/image-generation.
-     */
-    private function contentPartForImage(string $resolved): array
-    {
-        return ['type' => 'image_url', 'image_url' => ['url' => $resolved]];
-    }
-
-    /**
      * Resolve the api_key + timeout from ToolConfigService; construct the
      * HTTP client. Returns a failed {@see ToolResult} on missing key.
-     *
-     * @return MuseImageHttpClient|ToolResult
      */
     private function resolveClient(int $agentId, ?int $ownerId): MuseImageHttpClient|ToolResult
     {
@@ -194,16 +177,13 @@ final class MuseImageGenerationTool extends AbstractTool
     }
 
     /**
-     * Walk the chat-completions response and pull image URLs.
+     * Walk the OpenAI-shaped images response and pull base64 image blocks.
      *
-     * Primary path (per LLM Gateway docs): `choices[0].message.images[]`
-     * with `{type: "image_url", image_url: {url: "data:image/...;base64,..."}}`.
-     *
-     * Fallback paths (the Meta docs 500 on image endpoints, so we
-     * tolerate a few plausible shapes):
-     *   - `choices[0].message.images[]` with `b64_json` instead of an URL.
-     *   - `choices[0].message.content` containing an embedded
-     *     `data:image/...;base64,...` URL or a markdown image link.
+     * Response shape (both `/v1/images/generations` and `/v1/images/edits`):
+     *   - `data[].b64_json` — base64-encoded image bytes (default).
+     *   - `data[].url`     — temporary signed URL when `response_format: url`
+     *                        is requested (not surfaced today; we only
+     *                        handle the default `b64_json`).
      *
      * @param array<string, mixed> $response
      * @param array<string, mixed> $arguments
@@ -216,7 +196,7 @@ final class MuseImageGenerationTool extends AbstractTool
             $this->logger?->warning('muse-image response had no extractable image blocks', [
                 'keys' => array_keys($response),
             ]);
-            return new ToolResult(false, 'Muse Image returned no images in `choices[0].message`.');
+            return new ToolResult(false, 'Muse Image returned no images in `data`.');
         }
 
         $filenameStem = isset($arguments['filename']) && is_string($arguments['filename']) && trim($arguments['filename']) !== ''
@@ -253,103 +233,40 @@ final class MuseImageGenerationTool extends AbstractTool
      */
     private function extractImages(array $response): array
     {
-        $choices = $response['choices'] ?? null;
-        if (!is_array($choices) || $choices === []) {
-            return [];
-        }
-        $first = $choices[0] ?? null;
-        if (!is_array($first)) {
-            return [];
-        }
-        $message = $first['message'] ?? null;
-        if (!is_array($message)) {
+        $data = $response['data'] ?? null;
+        if (!is_array($data) || $data === []) {
             return [];
         }
 
         $blocks = [];
-
-        $images = $message['images'] ?? null;
-        if (is_array($images)) {
-            foreach ($images as $image) {
-                if (!is_array($image)) {
-                    continue;
-                }
-                $url = $image['image_url']['url'] ?? $image['url'] ?? null;
-                if (is_string($url) && $url !== '') {
-                    $block = $this->decodeImageUrl($url);
-                    if ($block !== null) {
-                        $blocks[] = $block;
-                        continue;
-                    }
-                }
-                $b64 = $image['b64_json'] ?? $image['image_base64'] ?? null;
-                if (is_string($b64) && $b64 !== '') {
-                    $blocks[] = ['b64' => $b64, 'mime' => $this->guessMime($image['mime_type'] ?? null)];
-                }
+        $mime = $this->mimeFromOutputFormat($response['output_format'] ?? null);
+        foreach ($data as $item) {
+            if (!is_array($item)) {
+                continue;
             }
-        }
-
-        if ($blocks !== []) {
-            return $blocks;
-        }
-
-        $content = $message['content'] ?? null;
-        if (is_string($content)) {
-            foreach ($this->extractFromString($content) as $block) {
-                $blocks[] = $block;
+            $b64 = $item['b64_json'] ?? null;
+            if (!is_string($b64) || trim($b64) === '') {
+                continue;
             }
+            $itemMime = is_string($item['mime_type'] ?? null) && $item['mime_type'] !== ''
+                ? $item['mime_type']
+                : $mime;
+            $blocks[] = ['b64' => $b64, 'mime' => $itemMime];
         }
 
         return $blocks;
-    }
-
-    /**
-     * @return list<array{b64: string, mime: string}>
-     */
-    private function extractFromString(string $content): array
-    {
-        $blocks = [];
-
-        if (preg_match_all('#data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+#', $content, $matches) > 0) {
-            foreach ($matches[0] as $uri) {
-                $block = $this->decodeImageUrl($uri);
-                if ($block !== null) {
-                    $blocks[] = $block;
-                }
-            }
-        }
-
-        return $blocks;
-    }
-
-    /**
-     * @return array{b64: string, mime: string}|null
-     */
-    private function decodeImageUrl(string $url): ?array
-    {
-        if (!str_starts_with($url, 'data:')) {
-            return null;
-        }
-        $comma = strpos($url, ',');
-        if ($comma === false) {
-            return null;
-        }
-        $meta = substr($url, 5, $comma - 5);
-        $b64 = substr($url, $comma + 1);
-        $mime = self::MIME_FALLBACK;
-        if (preg_match('#^image/[a-zA-Z0-9.+-]+#', $meta, $m) === 1) {
-            $mime = $m[0];
-        }
-        if (trim($b64) === '') {
-            return null;
-        }
-        return ['b64' => $b64, 'mime' => $mime];
     }
 
     /** @param mixed $hint */
-    private function guessMime(mixed $hint): string
+    private function mimeFromOutputFormat(mixed $hint): string
     {
-        return is_string($hint) && $hint !== '' ? $hint : self::MIME_FALLBACK;
+        return match (true) {
+            is_string($hint) && str_contains($hint, 'jpeg'),
+            is_string($hint) && str_contains($hint, 'jpg') => 'image/jpeg',
+            is_string($hint) && str_contains($hint, 'webp') => 'image/webp',
+            is_string($hint) && str_contains($hint, 'png') => 'image/png',
+            default => self::MIME_FALLBACK,
+        };
     }
 
     private function archive(string $base64, string $mime, string $prompt, ?string $filename, int $agentId, ?int $runnerId, int $index): string

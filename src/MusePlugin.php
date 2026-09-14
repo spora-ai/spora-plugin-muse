@@ -38,4 +38,34 @@ final class MusePlugin extends AbstractPlugin
     {
         return [MuseTranscribeProvider::class];
     }
+
+    /**
+     * Plugin-shipped skills live as siblings under `<plugin>/skills/<slug>/SKILL.md`.
+     * Today: `muse-image` (canonical recipe for the image-generation tool).
+     *
+     * `is_dir` guard keeps the override side-effect-free when the directory
+     * is absent (e.g. checkout without the `skills/` subtree).
+     *
+     * @return string[]
+     */
+    public function skillPaths(): array
+    {
+        $path = \dirname(__DIR__) . '/skills';
+        return is_dir($path) ? [$path] : [];
+    }
+
+    /**
+     * Agent-template files for the Muse plugin. The scanner reads depth-0
+     * `.json` / `.yaml` / `.yml` files. Today: `muse-image-expert.json`
+     * (a single-purpose image-generation agent that loads the `muse-image`
+     * skill as its canonical recipe).
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array
+    {
+        return [
+            \dirname(__DIR__) . '/agent-templates',
+        ];
+    }
 }

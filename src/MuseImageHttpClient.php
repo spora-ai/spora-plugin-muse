@@ -9,40 +9,30 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Thin, authenticated wrapper over Symfony's HttpClient for the Meta
- * Muse Image endpoint.
+ * Muse Image endpoints.
  *
- * Muse Image is exposed through Meta's OpenAI-compatible Chat Completions
- * gateway: `POST https://api.meta.ai/v1/chat/completions` with
- * `model: "muse-image"` by default (operator-overridable via the
- * `model` ToolSetting on {@see Tools\MuseImageGenerationTool}).
- * Image dimensions are passed via the Meta-specific `image_config` field
- * (`{image_size: "1024x1024"|"1024x1536"|"1536x1024"}`).
+ * Muse Image is exposed through two OpenAI-compatible endpoints on
+ * Meta's gateway:
+ *   - `POST https://api.meta.ai/v1/images/generations` — text-to-image.
+ *   - `POST https://api.meta.ai/v1/images/edits` — image-to-image /
+ *     compose from one or more reference images.
  *
- * Wire shape — text-to-image:
- * ```json
- * {
- *   "model": "muse-image",
- *   "messages": [{"role": "user", "content": "a cat in a top hat"}],
- *   "image_config": {"image_size": "1024x1024"}
- * }
- * ```
+ * Both accept an OpenAI-shaped JSON body (`{model, prompt, …}` for
+ * generations; `{model, prompt, images: [{image_url|file_id}]}` for
+ * edits). The default model is `muse-image-1.0`; an operator can
+ * override via the `model` ToolSetting on
+ * {@see Tools\MuseImageGenerationTool}.
  *
- * Wire shape — image edit (reference images attached to the user
- * message as `image_url` content parts, per OpenAI's edit convention).
- * Meta does not document the edit wire shape directly; we follow the
- * OpenAI / LLM Gateway convention so reference images land as
- * `image_url` parts inside `messages[].content[]`.
+ * Response shape (both endpoints): `{created, data: [{b64_json}], output_format, …}`.
+ * `data[].b64_json` is the base64-encoded image bytes; we surface those
+ * to the tool for ingest into the Media Archive.
  *
- * Response shape (per LLM Gateway docs, not directly verified in
- * dev.meta.ai — see PR notes): `choices[0].message.images[]` carrying
- * `{type: "image_url", image_url: {url: "data:image/png;base64,..."}}`.
- *
- * Single-shot: every failure surfaces to the caller so the LLM can adapt
- * on retry (smaller size, fewer reference images, raise timeout).
+ * Single-shot: every failure surfaces to the caller so the LLM can
+ * adapt on retry (smaller size, fewer reference images, raise timeout).
  */
 final class MuseImageHttpClient
 {
-    private const ENDPOINT = 'https://api.meta.ai/v1/chat/completions';
+    private const BASE_URL = 'https://api.meta.ai/v1';
     private const DEFAULT_SIZE = '1024x1024';
     private const ALLOWED_SIZES = ['1024x1024', '1024x1536', '1536x1024'];
 
@@ -54,19 +44,62 @@ final class MuseImageHttpClient
     ) {}
 
     /**
-     * @param list<array{role: string, content: string|list<array<string, mixed>>}> $messages
-     * @param array<string, mixed>|null $imageConfig
+     * @param array<string, mixed> $extra Optional Meta-specific fields to merge
+     *     into the request body (e.g. `output_format`, `tool_enablement`).
      * @return array<string, mixed>
      */
-    public function chat(array $messages, ?array $imageConfig = null): array
+    public function generate(string $prompt, ?string $size, array $extra = []): array
     {
-        $body = ['model' => $this->model, 'messages' => $messages];
-        if ($imageConfig !== null) {
-            $body['image_config'] = $imageConfig;
+        $body = ['model' => $this->model, 'prompt' => $prompt];
+        if ($size !== null && $size !== '') {
+            $body['size'] = $size;
         }
+        $body += $extra;
 
+        return $this->post(self::BASE_URL . '/images/generations', $body);
+    }
+
+    /**
+     * @param list<string> $imageUrls Public URL or data URI for each reference image.
+     * @param array<string, mixed> $extra Optional Meta-specific fields to merge
+     *     into the request body (e.g. `output_format`, `tool_enablement`).
+     * @return array<string, mixed>
+     */
+    public function edit(string $prompt, array $imageUrls, ?string $size, array $extra = []): array
+    {
+        $body = ['model' => $this->model, 'prompt' => $prompt];
+        if ($size !== null && $size !== '') {
+            $body['size'] = $size;
+        }
+        $images = [];
+        foreach ($imageUrls as $url) {
+            $images[] = ['image_url' => $url];
+        }
+        $body['images'] = $images;
+        $body += $extra;
+
+        return $this->post(self::BASE_URL . '/images/edits', $body);
+    }
+
+    /**
+     * @return string one of the {@see ALLOWED_SIZES} entries
+     */
+    public static function normaliseSize(mixed $size): string
+    {
+        if (is_string($size) && in_array($size, self::ALLOWED_SIZES, true)) {
+            return $size;
+        }
+        return self::DEFAULT_SIZE;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function post(string $url, array $body): array
+    {
         try {
-            $response = $this->httpClient->request('POST', self::ENDPOINT, [
+            $response = $this->httpClient->request('POST', $url, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $this->apiKey,
                     'Content-Type' => 'application/json',
@@ -99,17 +132,6 @@ final class MuseImageHttpClient
         }
 
         return $decoded;
-    }
-
-    /**
-     * @return string one of the {@see ALLOWED_SIZES} entries
-     */
-    public static function normaliseSize(mixed $size): string
-    {
-        if (is_string($size) && in_array($size, self::ALLOWED_SIZES, true)) {
-            return $size;
-        }
-        return self::DEFAULT_SIZE;
     }
 
     /** @param mixed $decoded */

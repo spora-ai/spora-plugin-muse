@@ -24,20 +24,17 @@ function buildImageTool(string $body, int $status = 200, array $settings = ['api
     return [$tool, $response];
 }
 
-test('generate returns one image URL on the happy path (choices[].message.images[])', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 64));
+/** @return string base64 bytes for a tiny PNG header. */
+function fakePngB64(int $pad = 64): string
+{
+    return base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", $pad));
+}
+
+test('generate posts to /v1/images/generations and returns the b64 image', function (): void {
     $body = json_encode([
-        'id' => 'chatcmpl-1',
-        'choices' => [[
-            'message' => [
-                'role' => 'assistant',
-                'content' => 'Here you go.',
-                'images' => [
-                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
-                ],
-            ],
-            'finish_reason' => 'stop',
-        ]],
+        'created' => 1784584435,
+        'data' => [['b64_json' => fakePngB64()]],
+        'output_format' => 'png',
     ]);
 
     [$tool, $response] = buildImageTool($body);
@@ -49,21 +46,12 @@ test('generate returns one image URL on the happy path (choices[].message.images
         ->and($result->data['image_urls'][0])->toStartWith('data:image/png;base64,')
         ->and($result->data['prompt'])->toBe('a cat');
 
-    expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/chat/completions')
+    expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/images/generations')
         ->and($response->getRequestMethod())->toBe('POST');
 });
 
-test('generate posts messages + image_config with the requested size to the Chat Completions endpoint', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 32));
-    $body = json_encode([
-        'choices' => [[
-            'message' => [
-                'images' => [
-                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
-                ],
-            ],
-        ]],
-    ]);
+test('generate sends {model, prompt, size} on the body, never an image_config wrapper', function (): void {
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(32)]]]);
 
     [$tool, $response] = buildImageTool($body);
     $tool->execute(
@@ -73,29 +61,20 @@ test('generate posts messages + image_config with the requested size to the Chat
     );
 
     $options = $response->getRequestOptions();
-    // Symfony normalizes `json` → `body` (JSON string) before storing request options.
     $json = json_decode((string) ($options['body'] ?? ''), true);
     expect($json)->not->toBeNull()
-        ->and($json['model'])->toBe('muse-image')
-        ->and($json['image_config'])->toBe(['image_size' => '1024x1536'])
-        ->and($json['messages'][0]['role'])->toBe('user')
-        ->and($json['messages'][0]['content'])->toBe('a tall cat');
+        ->and($json)->not->toHaveKey('image_config')
+        ->and($json)->not->toHaveKey('messages')
+        ->and($json['model'])->toBe('muse-image-1.0')
+        ->and($json['prompt'])->toBe('a tall cat')
+        ->and($json['size'])->toBe('1024x1536');
 });
 
 test('generate honours the model ToolSetting (operator-overridable model name)', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 16));
-    $body = json_encode([
-        'choices' => [[
-            'message' => [
-                'images' => [
-                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
-                ],
-            ],
-        ]],
-    ]);
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
 
     // Operator picks a predecessor model Meta has shipped against the
-    // same API — e.g. rolling back after a bad `muse-image` release.
+    // same API — e.g. rolling back after a bad `muse-image-1.0` release.
     [$tool, $response] = buildImageTool($body, settings: [
         'api_key' => 'sk-test',
         'model'   => 'meta/muse-image-1.0',
@@ -108,16 +87,7 @@ test('generate honours the model ToolSetting (operator-overridable model name)',
 });
 
 test('generate falls back to the default model when the setting is empty or whitespace', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 16));
-    $body = json_encode([
-        'choices' => [[
-            'message' => [
-                'images' => [
-                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
-                ],
-            ],
-        ]],
-    ]);
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
 
     foreach (['', '   '] as $empty) {
         [$tool, $response] = buildImageTool($body, settings: [
@@ -128,8 +98,23 @@ test('generate falls back to the default model when the setting is empty or whit
 
         $options = $response->getRequestOptions();
         $json = json_decode((string) ($options['body'] ?? ''), true);
-        expect($json['model'])->toBe('muse-image');
+        expect($json['model'])->toBe('muse-image-1.0');
     }
+});
+
+test('generate normalises an unknown size to 1024x1024', function (): void {
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+
+    [$tool, $response] = buildImageTool($body);
+    $tool->execute(
+        ['action' => 'generate', 'prompt' => 'a cat', 'size' => '9999x9999'],
+        agentId: 1,
+        userId: 1,
+    );
+
+    $options = $response->getRequestOptions();
+    $json = json_decode((string) ($options['body'] ?? ''), true);
+    expect($json['size'])->toBe('1024x1024');
 });
 
 test('generate fails cleanly on empty prompt', function (): void {
@@ -157,17 +142,8 @@ test('edit requires both prompt and input_images', function (): void {
     expect($missingPrompt->success)->toBeFalse();
 });
 
-test('edit posts an image_url content part alongside the text prompt', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 32));
-    $body = json_encode([
-        'choices' => [[
-            'message' => [
-                'images' => [
-                    ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . $png]],
-                ],
-            ],
-        ]],
-    ]);
+test('edit posts to /v1/images/edits with images[] on the body, not messages', function (): void {
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(32)]]]);
 
     [$tool, $response] = buildImageTool($body);
     $result = $tool->execute(
@@ -182,16 +158,27 @@ test('edit posts an image_url content part alongside the text prompt', function 
 
     expect($result->success)->toBeTrue();
 
+    expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/images/edits')
+        ->and($response->getRequestMethod())->toBe('POST');
+
     $options = $response->getRequestOptions();
     $json = json_decode((string) ($options['body'] ?? ''), true);
-    $content = $json['messages'][0]['content'];
-    expect($content)->toBeArray()
-        ->and($content[0]['type'])->toBe('text')
-        ->and($content[0]['text'])->toBe('make it sunset')
-        ->and($content[1]['type'])->toBe('image_url')
-        ->and($content[1]['image_url']['url'])->toBe('https://x.test/seed.png')
-        ->and($content[2]['type'])->toBe('image_url')
-        ->and($content[2]['image_url']['url'])->toBe('data:image/png;base64,AAA');
+    expect($json)->not->toBeNull()
+        ->and($json)->not->toHaveKey('messages')
+        ->and($json['model'])->toBe('muse-image-1.0')
+        ->and($json['prompt'])->toBe('make it sunset')
+        ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
+        ->and($json['images'][1]['image_url'])->toBe('data:image/png;base64,AAA');
+});
+
+test('edit rejects when every input_images entry is empty', function (): void {
+    [$tool] = buildImageTool('{}');
+    $result = $tool->execute(
+        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => ['', '   ']],
+        agentId: 1,
+    );
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('at least one non-empty');
 });
 
 test('generate returns a failed ToolResult when the upstream returns 502', function (): void {
@@ -204,12 +191,7 @@ test('generate returns a failed ToolResult when the upstream returns 502', funct
 });
 
 test('generate returns a failed ToolResult when no images are extractable', function (): void {
-    $body = json_encode([
-        'choices' => [[
-            'message' => ['role' => 'assistant', 'content' => 'Sorry, I cannot help with that.'],
-            'finish_reason' => 'stop',
-        ]],
-    ]);
+    $body = json_encode(['created' => 1, 'data' => [], 'output_format' => 'webp']);
     [$tool] = buildImageTool($body);
     $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
 
@@ -217,22 +199,19 @@ test('generate returns a failed ToolResult when no images are extractable', func
         ->and($result->content)->toContain('Muse Image returned no images');
 });
 
-test('generate falls back to an embedded data URL inside message.content', function (): void {
-    $png = base64_encode("\x89PNG\r\n\x1a\n" . str_repeat("\x00", 16));
-    $body = json_encode([
-        'choices' => [[
-            'message' => [
-                'role' => 'assistant',
-                'content' => 'Generated. ![img](data:image/png;base64,' . $png . ')',
-            ],
-        ]],
-    ]);
+test('generate infers image mime from the output_format field', function (): void {
+    foreach (['png' => 'image/png', 'webp' => 'image/webp', 'jpeg' => 'image/jpeg'] as $fmt => $mime) {
+        $body = json_encode([
+            'data' => [['b64_json' => fakePngB64(8)]],
+            'output_format' => $fmt,
+        ]);
 
-    [$tool] = buildImageTool($body);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
+        [$tool] = buildImageTool($body);
+        $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
 
-    expect($result->success)->toBeTrue()
-        ->and($result->data['image_urls'])->toHaveCount(1);
+        expect($result->success)->toBeTrue()
+            ->and($result->data['image_urls'][0])->toStartWith('data:' . $mime . ';base64,');
+    }
 });
 
 test('describeAction() picks the right label per operation', function (): void {

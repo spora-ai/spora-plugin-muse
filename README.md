@@ -3,7 +3,7 @@
 Meta Muse vendor home for [Spora](https://github.com/spora-ai/spora) agents. v1 ships two capabilities sharing one Meta Model API key:
 
 - **Muse Voice Transcribe** (`muse-voice-transcribe-1.0`) — speech-to-text via `POST https://api.meta.ai/v1/asr/transcribe`. Browser audio containers (webm/opus, ogg/opus, mp4/AAC) are transcoded to mono 16-bit PCM WAV at 24 kHz via `ffmpeg`.
-- **Muse Image** (`muse-image`) — image generation + editing via Meta's Chat-Completions-compatible endpoint. Generate + edit operations, Media Archive ingest.
+- **Muse Image** (`muse-image-1.0`) — image generation + editing via Meta's OpenAI-compatible `/v1/images/generations` and `/v1/images/edits` endpoints. Generate (text-to-image) + edit (image-to-image / compose) operations, Media Archive ingest.
 
 Future Muse capabilities (Spark text, Glimmer TTS, Muse Video) slot into this plugin as additional tools/providers — install once, get all Meta Muse capabilities.
 
@@ -35,7 +35,7 @@ Settings → Tools → Muse. Cascade: agent → principal → global.
 | `api_key`              | both       | yes      | —        | Meta Model API key; one key serves all Muse capabilities. Generate at <https://dev.meta.ai> → API Keys. Encrypted at rest. |
 | `display_name` (STT)   | STT        | no       | `Meta Muse Voice Transcribe` | Operator-facing label surfaced in the recording-button gate, the speech provider config list, and the per-agent speech settings section. Rename per-agent / per-user to disambiguate when several STT providers are configured. |
 | `model` (STT)          | STT        | no       | `muse-voice-transcribe-1.0` | Meta model identifier for STT. Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.). |
-| `model` (Image)        | Image      | no       | `muse-image` | Meta model identifier for image generation. Same rollback / A-B rationale as the STT model. |
+| `model` (Image)        | Image      | no       | `muse-image-1.0` | Meta model identifier for image generation. Same rollback / A-B rationale as the STT model. |
 | `SPORA_FFMPEG_BINARY`  | STT        | no       | `ffmpeg` | Env var override for the ffmpeg binary path (deployment-level, e.g. Docker / shared hosts). Wins over PATH. |
 | `mode`                 | STT        | no       | `PUSH_TO_TALK` | `PUSH_TO_TALK` (single-turn, default), `ENDPOINTING` (turn boundaries), or `DIARIZATION` (speaker labels). |
 | `language_bias`        | STT        | no       | (auto-detect) | Multi-select checkboxes. Biases recognition toward the picked languages (25 supported: Arabic, Bengali, Dutch, English, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malay, Mandarin Chinese, Marathi, Polish, Portuguese, Spanish, Tagalog, Tamil, Telugu, Thai, Turkish, Vietnamese). Pick multiple for code-switching sessions. |
@@ -51,7 +51,7 @@ Settings → Tools → Muse. Cascade: agent → principal → global.
 | `generate` | One image from a text prompt.                            | `prompt` (string, required), `filename` (optional stem, no ext), `size` (default `1024x1024`) | no       |
 | `edit`     | Edit/compose from reference URLs/data URIs + prompt.      | `prompt` (string, required), `input_images` (array, required), `filename` (optional), `size` (default `1024x1024`) | yes |
 
-Pricing: $0.01/image flat. Image sizes: `1024x1024` (default), `1024x1536` (portrait), `1536x1024` (landscape).
+Pricing: $0.01/image flat — billed per successfully-returned image (per Meta's docs). Image sizes: `1024x1024` (default, square), `1024x1536` (portrait), `1536x1024` (landscape). The size is a target aspect ratio; the model may produce a different exact pixel count.
 
 ### STT (`muse-voice-transcribe-1.0`)
 
