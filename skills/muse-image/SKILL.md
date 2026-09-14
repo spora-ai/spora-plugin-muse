@@ -31,7 +31,7 @@ Both return `{created, data: [{b64_json}], output_format, background, usage}`. T
 | -------------- | -------- | ------------- | ----- |
 | `action`       | no       | `generate`    | `generate` or `edit`. |
 | `prompt`       | yes      | —             | Subject + style description. `edit` instructions describe the change, not the whole image. Be concrete — material, lighting, camera cues. |
-| `input_images` | edit only | —           | Array of reference image URLs (https/http) or data URIs (`data:image/png;base64,…`). Empty / whitespace-only entries are dropped silently. |
+| `input_images` | edit only | —           | Array of reference images. Each item is one of: a public URL (`https://…`), a data URI (`data:image/png;base64,…`), a Spora Media Archive UUID (`12345678-…`, with optional `.ext`), or an opaque `/api/v1/assets/<uuid>.<ext>` URL. UUIDs are resolved server-side and inlined as data URIs before the request to Meta — Meta can't fetch Spora-local assets directly. Empty / whitespace-only entries are dropped silently. |
 | `size`         | no       | `1024x1024`   | Aspect-ratio target. `1024x1024` (square), `1024x1536` (portrait), `1536x1024` (landscape). Unknown values fall back to default. |
 | `filename`     | no       | auto          | Stem only — extension is appended. Kebab-case Latin. |
 

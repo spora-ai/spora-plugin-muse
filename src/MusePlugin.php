@@ -9,6 +9,7 @@ use Spora\Events\ContainerBuildingEvent;
 use Spora\Plugins\AbstractPlugin;
 use Spora\Plugins\Muse\Tools\MuseImageGenerationTool;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -98,24 +99,43 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
      * PHP-DI quirk: nullable ctor params with `= null` defaults are
      * short-circuited to null by DefaultValueResolver before the type-hint
      * resolver runs, so the tool's optional `?LoggerInterface $logger`
-     * ctor param never gets autowired. `MediaArchiveService` is *not*
-     * a ctor param at all — it's a setter, which PHP-DI only calls if
-     * told to. Both need explicit `\DI\autowire()->method(...)` wiring.
+     * ctor param never gets autowired. `MediaArchiveService` and
+     * `MuseImageArchiveResolver` are not ctor params at all — they're
+     * setters, which PHP-DI only calls if told to. All three need
+     * explicit `\DI\autowire()->method(...)` wiring.
      *
      * Without this, the tool renders inline images as raw `data:` URIs,
      * the chat UI sanitizer truncates them to `[data-omitted]`, and the
      * user sees a broken placeholder. With it, images land in the Media
      * Archive and render as `/api/v1/assets/<token>.<ext>`.
+     *
+     * The resolver needs a closure into the host's `MediaAssetReader` so
+     * the plugin stays decoupled from the `final` core service (matches
+     * the MiniMax plugin's pattern for the same reason).
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
         $builder        = $event->builder();
         $archiveService = \DI\get(MediaArchiveService::class);
         $logger         = \DI\get(LoggerInterface::class);
+        $assetReader    = \DI\get(MediaAssetReader::class);
+
+        $resolver = \DI\factory(static function (
+            MediaAssetReader $reader,
+            ?LoggerInterface $logger,
+        ): MuseImageArchiveResolver {
+            return new MuseImageArchiveResolver(
+                static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId),
+                $logger,
+            );
+        });
 
         $builder->addDefinitions([
+            MuseImageArchiveResolver::class => $resolver,
+
             MuseImageGenerationTool::class => \DI\autowire()
                 ->method('setMediaArchive', $archiveService)
+                ->method('setImageArchiveResolver', \DI\get(MuseImageArchiveResolver::class))
                 ->method('setLogger', $logger),
         ]);
     }

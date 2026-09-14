@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Psr\Log\NullLogger;
+use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\Tools\MuseImageGenerationTool;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -169,6 +170,57 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         ->and($json['prompt'])->toBe('make it sunset')
         ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
         ->and($json['images'][1]['image_url'])->toBe('data:image/png;base64,AAA');
+});
+
+test('edit resolves a Media Archive UUID into an inline data URI on the wire', function (): void {
+    $uuid = '12345678-1234-1234-1234-123456789abc';
+    $png = "\x89PNG\r\n\x1a\n" . str_repeat("\x00", 32);
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(32)]]]);
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-test']);
+    $response = new MockResponse($body, ['http_code' => 200]);
+    $mock = new MockHttpClient([$response]);
+    $tool = new MuseImageGenerationTool($config, $mock, new NullLogger());
+    $tool->setMediaArchive(null);
+    $tool->setImageArchiveResolver(new MuseImageArchiveResolver(
+        static fn(string $id): array => [
+            'status' => 'data_url',
+            'bytes'  => $png,
+            'mime'   => 'image/png',
+        ],
+    ));
+
+    $tool->execute(
+        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => [$uuid]],
+        agentId: 1,
+        userId: 1,
+    );
+
+    $options = $response->getRequestOptions();
+    $json = json_decode((string) ($options['body'] ?? ''), true);
+    expect($json['images'])->toHaveCount(1)
+        ->and($json['images'][0]['image_url'])->toBe('data:image/png;base64,' . base64_encode($png));
+});
+
+test('edit surfaces a failed ToolResult when a UUID does not resolve', function (): void {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-test']);
+    $mock = new MockHttpClient([]);  // no requests expected
+    $tool = new MuseImageGenerationTool($config, $mock, new NullLogger());
+    $tool->setMediaArchive(null);
+    $tool->setImageArchiveResolver(new MuseImageArchiveResolver(
+        static fn(string $id): ?array => null,
+    ));
+
+    $result = $tool->execute(
+        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => ['00000000-0000-0000-0000-000000000000']],
+        agentId: 1,
+        userId: 1,
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('not found in the Spora Media Archive');
 });
 
 test('edit rejects when every input_images entry is empty', function (): void {

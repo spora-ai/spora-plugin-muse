@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Plugins\Muse\Tools;
 
 use Psr\Log\LoggerInterface;
+use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\MuseImageException;
 use Spora\Plugins\Muse\MuseImageHttpClient;
 use Spora\Plugins\Muse\MuseImagePayloadException;
@@ -46,6 +47,7 @@ final class MuseImageGenerationTool extends AbstractTool
 
     private ?LoggerInterface $logger;
     private ?MediaArchiveService $mediaArchive = null;
+    private ?MuseImageArchiveResolver $imageArchiveResolver = null;
 
     public function __construct(
         private readonly ToolConfigService $configService,
@@ -58,6 +60,11 @@ final class MuseImageGenerationTool extends AbstractTool
     public function setMediaArchive(?MediaArchiveService $mediaArchive): void
     {
         $this->mediaArchive = $mediaArchive;
+    }
+
+    public function setImageArchiveResolver(?MuseImageArchiveResolver $imageArchiveResolver): void
+    {
+        $this->imageArchiveResolver = $imageArchiveResolver;
     }
 
     public function setLogger(?LoggerInterface $logger): void
@@ -125,6 +132,18 @@ final class MuseImageGenerationTool extends AbstractTool
 
         if ($prompt === '' || !is_array($inputImages) || $inputImages === []) {
             return new ToolResult(false, 'edit requires both `prompt` and at least one `input_images` entry.');
+        }
+
+        // Resolve Media Archive UUIDs → inline data URIs (or forward
+        // external source URLs) before the empty/whitespace filter and
+        // the Meta call. Surfaces "asset not found" failures cleanly.
+        if ($this->imageArchiveResolver !== null) {
+            $resolved = $this->imageArchiveResolver->resolve($arguments, $runnerId);
+            if (isset($resolved['failed'])) {
+                return $resolved['failed'];
+            }
+            $arguments = $resolved['resolved'];
+            $inputImages = $arguments['input_images'];
         }
 
         $imageUrls = [];
