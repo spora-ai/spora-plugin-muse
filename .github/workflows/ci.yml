@@ -35,6 +35,11 @@ jobs:
           coverage: none
           tools: composer
 
+      - name: Install ffmpeg
+        # Muse STT provider shells out to ffmpeg for browser-container → PCM WAV
+        # conversion. Required by MuseTranscribeProviderTest happy paths.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 

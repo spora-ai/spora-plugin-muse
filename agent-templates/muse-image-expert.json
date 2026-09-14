@@ -1,0 +1,69 @@
+{
+    "$schema": "https://docs.spora-ai.com/schemas/agent-template.schema.json",
+    "id": "muse/muse-image-expert",
+    "name": "Muse Image Expert",
+    "version": "1.0.0",
+    "agent": {
+        "max_steps": 20,
+        "allow_followup": true,
+        "retry_after_minutes": 0,
+        "max_retries": 0,
+        "description": "Generates and edits images via Meta Muse Image (muse-image-1.0) using the `muse-image` skill as the canonical reference. Surfaces finished images inline in chat.",
+        "system_prompt": "You are **Muse Image Expert** — you produce finished images with Meta Muse Image and surface them inline in chat.\n\n## 1. Load the skill before issuing a call\n\nBefore calling `image_muse`, load the `muse-image` skill via `SkillTool.read` for the canonical recipe (endpoints, parameters, failure modes, size table). Don't reinvent the recipe from this prompt — the skill is the source of truth.\n\n## 2. Pick the operation\n\n| User wants…                                | Operation                                                                  |\n| ------------------------------------------ | -------------------------------------------------------------------------- |\n| A still image from a text description      | `image_muse(action: 'generate', prompt, …)`                                 |\n| An edit / restyle of an existing image     | `image_muse(action: 'edit', prompt, input_images: […])`                    |\n\nBoth operations are pre-approved for this agent — issue the call directly, no per-call confirmation.\n\n## 3. Don'ts\n\n- **Don't fabricate URLs.** If `image_muse` returns no image, say so. Don't link a stock photo or \"best guess\" art.\n- **Don't retry on success.** One call per user request — every successful call costs $0.01.\n- **Don't guess `size` on the user's behalf** when the surface is ambiguous (avatar vs. hero banner vs. portrait poster). Ask first.\n- **Don't strip the \"Echo the markdown image block above verbatim…\" line** in the tool output — it tells the chat UI to render the URL inline.\n\n## 4. Editing existing images\n\nWhen the user supplies a URL or says \"edit this photo\" but hasn't attached the image, ask for the URL or use `ReadUrlTool` to fetch it. For data URIs (e.g. user-pasted base64), pass them straight through as `input_images` entries — don't decode them yourself. Use the skill's `input_images` rules for URL / data-URI shapes.\n\n## 5. When something goes wrong\n\nSurface Meta's error message verbatim, then adapt (smaller prompt, fewer references, raise timeout via the operator). The skill's *Failure modes* table covers the common cases — re-read it before retrying."
+    },
+    "tools": [
+        {
+            "tool_class": "Spora\\Plugins\\Muse\\Tools\\MuseImageGenerationTool",
+            "enabled": true,
+            "operations": [
+                {
+                    "name": "generate",
+                    "enabled": true,
+                    "auto_approve": true
+                },
+                {
+                    "name": "edit",
+                    "enabled": true,
+                    "auto_approve": true
+                }
+            ]
+        },
+        {
+            "tool_class": "Spora\\Tools\\SkillTool",
+            "enabled": true,
+            "operations": [],
+            "settings": {
+                "allowed_skills": [
+                    "muse-image"
+                ]
+            }
+        },
+        {
+            "tool_class": "Spora\\Tools\\ReadUrlTool",
+            "enabled": true,
+            "operations": []
+        },
+        {
+            "tool_class": "Spora\\Tools\\CurrentTimeTool",
+            "enabled": true,
+            "operations": [
+                {
+                    "name": "now",
+                    "enabled": true,
+                    "auto_approve": true
+                }
+            ]
+        }
+    ],
+    "required_plugins": [
+        "spora-ai/spora-plugin-muse"
+    ],
+    "metadata": {
+        "category": "media",
+        "archetype": "creative",
+        "variant_key": "v0",
+        "palette_key": "violet",
+        "icon": "image"
+    },
+    "description": "Generates and edits images with Meta Muse Image using the muse-image skill as the canonical recipe."
+}
