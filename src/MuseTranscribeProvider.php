@@ -13,6 +13,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\Process\Exception\ProcessStartFailedException;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
@@ -174,7 +175,11 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
             throw new SpeechToTextException('Meta Model API key is not configured for this user.');
         }
 
-        $envBinary = (string) ($_ENV['SPORA_FFMPEG_BINARY'] ?? (getenv('SPORA_FFMPEG_BINARY') ?: ''));
+        $envBinary = getenv('SPORA_FFMPEG_BINARY');
+        if ($envBinary === false || $envBinary === '') {
+            $envBinary = $_ENV['SPORA_FFMPEG_BINARY'] ?? '';
+        }
+        $envBinary = (string) $envBinary;
         $ffmpegBinary = $envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG;
 
         $mode = $this->readMode($settings);
@@ -218,9 +223,17 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
                     ],
                     'timeout' => 60,
                 ]);
+            } catch (TransportExceptionInterface $e) {
+                throw new SpeechToTextException('Muse STT transport error: ' . $e->getMessage(), 0, $e);
+            }
+            try {
                 $payload = $response->toArray();
             } catch (Throwable $e) {
-                throw new SpeechToTextException('Muse STT request failed: ' . $e->getMessage(), 0, $e);
+                // Body failed to decode as JSON — Meta returned non-JSON (HTML
+                // error page on 5xx, or a non-2xx with text/plain). Surface
+                // as 422 since the request shape was rejected; the operator
+                // can re-check the input.
+                throw new InvalidAudioException('Muse STT returned a non-JSON body: ' . $e->getMessage(), 0, $e);
             } finally {
                 if (is_resource($audioStream)) {
                     fclose($audioStream);
@@ -368,8 +381,15 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
      */
     private function convertToWavPcm16(string $bytes, string $mimeType, string $ffmpegBinary): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'spora-muse-') . '.wav';
-        $in   = tempnam(sys_get_temp_dir(), 'spora-muse-in-') . '.' . $this->extensionFor($mimeType);
+        $path = tempnam(sys_get_temp_dir(), 'spora-muse-');
+        $stub = $path;
+        $path .= '.wav';
+        @unlink($stub);
+
+        $in = tempnam(sys_get_temp_dir(), 'spora-muse-in-');
+        $inStub = $in;
+        $in .= '.' . $this->extensionFor($mimeType);
+        @unlink($inStub);
         try {
             file_put_contents($in, $bytes);
 

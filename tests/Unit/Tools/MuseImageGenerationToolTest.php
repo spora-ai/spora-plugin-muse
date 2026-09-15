@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\Tools\MuseImageGenerationTool;
+use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -272,4 +274,57 @@ test('describeAction() picks the right label per operation', function (): void {
         ->toBe("Generate image for prompt: 'a cat'");
     expect($tool->describeAction(['action' => 'edit', 'prompt' => 'a cat']))
         ->toBe("Edit image(s) with prompt: 'a cat'");
+});
+
+test('execute tolerates a null PrincipalContext (PHP 8.4 + 8.5)', function (): void {
+    // Mirror the canonical AgentTool null-check in
+    // vendor/spora-ai/spora-core/app/Tools/AgentTool.php:411. PHP 8.4
+    // throws a fatal Error on null property access; PHP 8.5 silently
+    // coerces. Either way, execute() must complete with a ToolResult.
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+    [$tool] = buildImageTool($body);
+
+    $result = $tool->execute(
+        ['action' => 'generate', 'prompt' => 'a cat'],
+        agentId: 1,
+        userId: 1,
+        context: null,
+    );
+
+    expect($result)->toBeInstanceOf(ToolResult::class)
+        ->and($result->success)->toBeTrue();
+});
+
+test('archive() returns a data URI when MediaArchiveService throws (failure is logged, not swallowed)', function (): void {
+    // `MediaArchiveService` is `final` and Mockery can't subclass it.
+    // Build a real instance via reflection (skipping the ctor) so the
+    // `ingest()` call lands on an uninitialised pipeline, which raises
+    // a Throwable — the catch block must convert that into a logged
+    // warning + a fallback data: URI (no escape to ToolInterface::execute).
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-test']);
+    $response = new MockResponse($body, ['http_code' => 200]);
+    $mock = new MockHttpClient([$response]);
+
+    $archive = (new ReflectionClass(MediaArchiveService::class))->newInstanceWithoutConstructor();
+
+    $logger = Mockery::mock(LoggerInterface::class);
+    $logger->shouldReceive('warning')
+        ->once()
+        ->with('muse-image.archive-failed', Mockery::on(function (array $ctx): bool {
+            return $ctx['mime'] === 'image/png'
+                && $ctx['prompt_bytes'] === 5
+                && $ctx['agent_id'] === 1
+                && $ctx['exception'] instanceof Throwable;
+        }));
+
+    $tool = new MuseImageGenerationTool($config, $mock, $logger);
+    $tool->setMediaArchive($archive);
+
+    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->data['image_urls'][0])->toStartWith('data:image/png;base64,');
 });

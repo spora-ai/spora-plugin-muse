@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Muse;
 
+use RuntimeException;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -124,6 +125,7 @@ final class MuseImageHttpClient
             throw new MuseImageException(
                 $this->errorMessage($decoded, $status),
                 $this->timeoutSeconds,
+                new RuntimeException('Raw response: ' . substr($raw, 0, 512)),
             );
         }
 
