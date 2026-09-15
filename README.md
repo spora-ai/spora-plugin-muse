@@ -7,7 +7,7 @@ Meta Muse vendor home for [Spora](https://github.com/spora-ai/spora) agents. v1 
 
 Future Muse capabilities (Spark text, Glimmer TTS, Muse Video) slot into this plugin as additional tools/providers — install once, get all Meta Muse capabilities.
 
-> **Pre-release notice (v1.0.0).** The plugin depends on `Spora\Speech\SpeechToTextProviderInterface` (the speech-input contract added in `spora-core` for the speech-input plan). That contract lands on `spora-core`'s `main` as part of an upcoming core release; until the first tagged core that ships the interface is published, `php bin/spora plugin:install spora-ai/spora-plugin-muse` against the released `spora-core` will fail at boot with `Class "Spora\Speech\SpeechToTextProviderInterface" not found`. To run the plugin today, install it against `spora-core`'s `main` (or the `feat/speech-input-core-contract` branch) — see [Local development](#local-development) below. The `v1.0.0` tag will be cut **after** the matching core release ships.
+> **Pre-release notice (v0.1.0).** The plugin depends on `Spora\Speech\SpeechToTextProviderInterface` (the speech-input contract added in `spora-core` for the speech-input plan). That contract lands on `spora-core`'s `main` as part of an upcoming core release; until the first tagged core that ships the interface is published, `php bin/spora plugin:install spora-ai/spora-plugin-muse` against the released `spora-core` will fail at boot with `Class "Spora\Speech\SpeechToTextProviderInterface" not found`. To run the plugin today, install it against `spora-core`'s `main` (or the `feat/speech-input-core-contract` branch) — see [Local development](#local-development) below. The `v0.1.0` tag will be cut **after** the matching core release ships.
 
 ## Installation
 
@@ -87,7 +87,7 @@ cd ../spora-plugin-muse && composer install
 composer analyse && composer test:parallel && composer lint
 ```
 
-When the core release ships, update `composer.json`'s `require` block from `"dev-feat/speech-input-core-contract as 0.24.0"` to `"^0.24.0"` and drop the `repositories` entry — the v1.0.0 tag is gated on that switch.
+When the core release ships, update `composer.json`'s `require` block from `"dev-feat/speech-input-core-contract as 0.24.0"` to `"^0.24.0"` and drop the `repositories` entry — the v0.1.0 tag is gated on that switch.
 
 ---
 
