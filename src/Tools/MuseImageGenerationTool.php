@@ -44,6 +44,7 @@ final class MuseImageGenerationTool extends AbstractTool
     private const DEFAULT_TIMEOUT_SECONDS = 300;
     private const DEFAULT_MODEL = 'muse-image-1.0';
     private const MIME_FALLBACK = 'image/png';
+    private const DATA_URI_BASE64_PREFIX = ';base64,';
 
     private ?LoggerInterface $logger;
     private ?MediaArchiveService $mediaArchive = null;
@@ -292,7 +293,7 @@ final class MuseImageGenerationTool extends AbstractTool
             return self::MIME_FALLBACK;
         }
         return match (strtolower($hint)) {
-            'png' => 'image/png',
+            'png' => self::MIME_FALLBACK,
             'jpeg', 'jpg' => 'image/jpeg',
             'webp' => 'image/webp',
             default => self::MIME_FALLBACK,
@@ -307,7 +308,7 @@ final class MuseImageGenerationTool extends AbstractTool
         }
         $archive = $this->mediaArchive;
         if (!$archive instanceof MediaArchiveService) {
-            return 'data:' . $mime . ';base64,' . $base64;
+            return $this->dataUri($mime, $base64);
         }
         $ext = $this->extensionForMime($mime);
         $archiveFilename = $filename !== null
@@ -325,10 +326,7 @@ final class MuseImageGenerationTool extends AbstractTool
                 filename: $archiveFilename,
             ));
             $url = (string) $asset->asset_url;
-            if ($url === '') {
-                return 'data:' . $mime . ';base64,' . $base64;
-            }
-            return $url;
+            return $url !== '' ? $url : $this->dataUri($mime, $base64);
         } catch (Throwable $e) {
             $this->logger?->warning('muse-image.archive-failed', [
                 'exception'    => $e,
@@ -336,14 +334,19 @@ final class MuseImageGenerationTool extends AbstractTool
                 'prompt_bytes' => strlen($prompt),
                 'agent_id'     => $agentId,
             ]);
-            return 'data:' . $mime . ';base64,' . $base64;
+            return $this->dataUri($mime, $base64);
         }
+    }
+
+    private function dataUri(string $mime, string $base64): string
+    {
+        return 'data:' . $mime . self::DATA_URI_BASE64_PREFIX . $base64;
     }
 
     private function extensionForMime(string $mime): string
     {
         return match (strtolower($mime)) {
-            'image/png'  => 'png',
+            self::MIME_FALLBACK => 'png',
             'image/jpeg' => 'jpg',
             'image/webp' => 'webp',
             default      => 'png',

@@ -175,13 +175,7 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
             throw new SpeechToTextException('Meta Model API key is not configured for this user.');
         }
 
-        $envBinary = getenv('SPORA_FFMPEG_BINARY');
-        if ($envBinary === false || $envBinary === '') {
-            $envBinary = $_ENV['SPORA_FFMPEG_BINARY'] ?? '';
-        }
-        $envBinary = (string) $envBinary;
-        $ffmpegBinary = $envBinary !== '' ? $envBinary : self::DEFAULT_FFMPEG;
-
+        $ffmpegBinary = $this->resolveFfmpegBinary();
         $mode = $this->readMode($settings);
         $model = $this->readModel($settings);
         $keywords = $this->readStringList($settings, 'keywords', ',');
@@ -202,43 +196,7 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
 
         $wavPath = $this->convertToWavPcm16($bytes, $mimeType, $ffmpegBinary);
         try {
-            // Symfony's HttpClient does NOT accept a `multipart` option;
-            // it auto-flips to `multipart/form-data` when any value in
-            // `body` is a PHP resource (HttpClientTrait::normalizeBody).
-            // Pass the WAV file as a resource and the JSON request blob
-            // as a plain string — Symfony serialises both correctly. The
-            // basename of the file stream becomes the multipart filename
-            // (no need to set it explicitly; Meta's API reads the bytes,
-            // not the filename).
-            $audioStream = fopen($wavPath, 'rb');
-            if ($audioStream === false) {
-                throw new SpeechToTextException("Could not open WAV file at {$wavPath} for upload.");
-            }
-            try {
-                $response = $this->http->request('POST', self::ENDPOINT, [
-                    'headers' => ['Authorization' => 'Bearer ' . $apiKey],
-                    'body' => [
-                        'request' => $this->buildRequestPart($mode, $model, $keywords, $languageBias),
-                        'audio'   => $audioStream,
-                    ],
-                    'timeout' => 60,
-                ]);
-            } catch (TransportExceptionInterface $e) {
-                throw new SpeechToTextException('Muse STT transport error: ' . $e->getMessage(), 0, $e);
-            }
-            try {
-                $payload = $response->toArray();
-            } catch (Throwable $e) {
-                // Body failed to decode as JSON — Meta returned non-JSON (HTML
-                // error page on 5xx, or a non-2xx with text/plain). Surface
-                // as 422 since the request shape was rejected; the operator
-                // can re-check the input.
-                throw new InvalidAudioException('Muse STT returned a non-JSON body: ' . $e->getMessage(), 0, $e);
-            } finally {
-                if (is_resource($audioStream)) {
-                    fclose($audioStream);
-                }
-            }
+            $payload = $this->requestTranscript($apiKey, $wavPath, $mode, $model, $keywords, $languageBias);
         } finally {
             @unlink($wavPath);
         }
@@ -262,6 +220,76 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
                 'mode' => $mode,
             ],
         );
+    }
+
+    /**
+     * Resolve the ffmpeg binary path: env var first (shell-set on PHP-FPM
+     * most reliably surfaces via getenv; $_ENV is empty for shell-set vars
+     * but is the right read for vars loaded from a .env via vlucas/dotenv),
+     * then fall back to `ffmpeg` on `$PATH`.
+     */
+    private function resolveFfmpegBinary(): string
+    {
+        $envBinary = getenv('SPORA_FFMPEG_BINARY');
+        if ($envBinary === false || $envBinary === '') {
+            $envBinary = $_ENV['SPORA_FFMPEG_BINARY'] ?? '';
+        }
+        return $envBinary !== '' ? (string) $envBinary : self::DEFAULT_FFMPEG;
+    }
+
+    /**
+     * POST the WAV file to Meta's batch ASR endpoint and decode the
+     * JSON response. Symfony's HttpClient does NOT accept a `multipart`
+     * option; it auto-flips to `multipart/form-data` when any value in
+     * `body` is a PHP resource (HttpClientTrait::normalizeBody). Pass
+     * the WAV file as a resource and the JSON request blob as a plain
+     * string — Symfony serialises both correctly. The basename of the
+     * file stream becomes the multipart filename (no need to set it
+     * explicitly; Meta's API reads the bytes, not the filename).
+     *
+     * Returns the decoded JSON body. Throws:
+     *   - SpeechToTextException on transport failure (502)
+     *   - InvalidAudioException when Meta returned a non-JSON body (422)
+     *
+     * @param  list<string>           $keywords
+     * @param  list<string>           $languageBias
+     * @return array<string, mixed>
+     */
+    private function requestTranscript(
+        string $apiKey,
+        string $wavPath,
+        string $mode,
+        string $model,
+        array $keywords,
+        array $languageBias,
+    ): array {
+        $audioStream = fopen($wavPath, 'rb');
+        if ($audioStream === false) {
+            throw new SpeechToTextException("Could not open WAV file at {$wavPath} for upload.");
+        }
+        try {
+            try {
+                $response = $this->http->request('POST', self::ENDPOINT, [
+                    'headers' => ['Authorization' => 'Bearer ' . $apiKey],
+                    'body' => [
+                        'request' => $this->buildRequestPart($mode, $model, $keywords, $languageBias),
+                        'audio'   => $audioStream,
+                    ],
+                    'timeout' => 60,
+                ]);
+            } catch (TransportExceptionInterface $e) {
+                throw new SpeechToTextException('Muse STT transport error: ' . $e->getMessage(), 0, $e);
+            }
+            try {
+                return $response->toArray();
+            } catch (Throwable $e) {
+                throw new InvalidAudioException('Muse STT returned a non-JSON body: ' . $e->getMessage(), 0, $e);
+            }
+        } finally {
+            if (is_resource($audioStream)) {
+                fclose($audioStream);
+            }
+        }
     }
 
     /**

@@ -12,6 +12,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
+const TEST_DATA_URI_PNG_PREFIX = 'data:image/png;base64,';
+const TEST_MIME_PNG = 'image/png';
+
 /**
  * @return array{0: MuseImageGenerationTool, 1: MockResponse}
  */
@@ -46,7 +49,7 @@ test('generate posts to /v1/images/generations and returns the b64 image', funct
     expect($result)->toBeInstanceOf(ToolResult::class)
         ->and($result->success)->toBeTrue()
         ->and($result->data['image_urls'])->toHaveCount(1)
-        ->and($result->data['image_urls'][0])->toStartWith('data:image/png;base64,')
+        ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX)
         ->and($result->data['prompt'])->toBe('a cat');
 
     expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/images/generations')
@@ -153,7 +156,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         [
             'action' => 'edit',
             'prompt' => 'make it sunset',
-            'input_images' => ['https://x.test/seed.png', 'data:image/png;base64,AAA'],
+            'input_images' => ['https://x.test/seed.png', TEST_DATA_URI_PNG_PREFIX . 'AAA'],
         ],
         agentId: 1,
         userId: 1,
@@ -171,7 +174,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         ->and($json['model'])->toBe('muse-image-1.0')
         ->and($json['prompt'])->toBe('make it sunset')
         ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
-        ->and($json['images'][1]['image_url'])->toBe('data:image/png;base64,AAA');
+        ->and($json['images'][1]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . 'AAA');
 });
 
 test('edit resolves a Media Archive UUID into an inline data URI on the wire', function (): void {
@@ -189,7 +192,7 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
         static fn(string $id): array => [
             'status' => 'data_url',
             'bytes'  => $png,
-            'mime'   => 'image/png',
+            'mime'   => TEST_MIME_PNG,
         ],
     ));
 
@@ -202,7 +205,7 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
     $options = $response->getRequestOptions();
     $json = json_decode((string) ($options['body'] ?? ''), true);
     expect($json['images'])->toHaveCount(1)
-        ->and($json['images'][0]['image_url'])->toBe('data:image/png;base64,' . base64_encode($png));
+        ->and($json['images'][0]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . base64_encode($png));
 });
 
 test('edit surfaces a failed ToolResult when a UUID does not resolve', function (): void {
@@ -254,7 +257,7 @@ test('generate returns a failed ToolResult when no images are extractable', func
 });
 
 test('generate infers image mime from the output_format field', function (): void {
-    foreach (['png' => 'image/png', 'webp' => 'image/webp', 'jpeg' => 'image/jpeg'] as $fmt => $mime) {
+    foreach (['png' => TEST_MIME_PNG, 'webp' => 'image/webp', 'jpeg' => 'image/jpeg'] as $fmt => $mime) {
         $body = json_encode([
             'data' => [['b64_json' => fakePngB64(8)]],
             'output_format' => $fmt,
@@ -314,7 +317,7 @@ test('archive() returns a data URI when MediaArchiveService throws (failure is l
     $logger->shouldReceive('warning')
         ->once()
         ->with('muse-image.archive-failed', Mockery::on(function (array $ctx): bool {
-            return $ctx['mime'] === 'image/png'
+            return $ctx['mime'] === TEST_MIME_PNG
                 && $ctx['prompt_bytes'] === 5
                 && $ctx['agent_id'] === 1
                 && $ctx['exception'] instanceof Throwable;
@@ -326,5 +329,5 @@ test('archive() returns a data URI when MediaArchiveService throws (failure is l
     $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
 
     expect($result->success)->toBeTrue()
-        ->and($result->data['image_urls'][0])->toStartWith('data:image/png;base64,');
+        ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX);
 });
