@@ -36,7 +36,7 @@ use Throwable;
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Meta model identifier for image generation. Default `muse-image-1.0`. Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).', default: 'muse-image-1.0')]
 #[ToolSetting(key: 'http_timeout_seconds', label: 'HTTP timeout (s)', type: 'number', description: 'Per-request timeout. Default 300 seconds — Muse Image returns in ~5–20 s typically; raise if editing large reference images.', default: '300')]
 #[ToolParameter(name: 'prompt', type: 'string', description: 'The text prompt. Required for both `generate` and `edit`.', required: true, maximum: 32000)]
-#[ToolParameter(name: 'input_images', type: 'array', description: 'Reference images for `edit`. Each item is a URL string (http/https or data: URI). Only meaningful for `edit`.', required: false)]
+#[ToolParameter(name: 'input_images', type: 'array', items: ['type' => 'string'], description: 'Reference images for `edit`. Each item is a public URL (https/http), a data URI (data:image/png;base64,…), a Spora Media Archive UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, with optional .ext), or an opaque /api/v1/assets/<uuid>.<ext> URL. UUIDs are resolved server-side and inlined as data URIs before the request to Meta — Meta cannot fetch Spora-local assets directly. Empty or whitespace-only entries are dropped silently. Only meaningful for `edit`.', required: false)]
 #[ToolParameter(name: 'filename', type: 'string', description: 'Optional human-readable filename stem without an extension. The correct file extension is appended automatically.', required: false, maximum: 120)]
 #[ToolParameter(name: 'size', type: 'string', description: 'Image size: `1024x1024` (default, square), `1024x1536` (portrait), or `1536x1024` (landscape). Invalid values fall back to the default.', required: false)]
 final class MuseImageGenerationTool extends AbstractTool
@@ -44,6 +44,7 @@ final class MuseImageGenerationTool extends AbstractTool
     private const DEFAULT_TIMEOUT_SECONDS = 300;
     private const DEFAULT_MODEL = 'muse-image-1.0';
     private const MIME_FALLBACK = 'image/png';
+    private const DATA_URI_BASE64_PREFIX = ';base64,';
 
     private ?LoggerInterface $logger;
     private ?MediaArchiveService $mediaArchive = null;
@@ -79,8 +80,17 @@ final class MuseImageGenerationTool extends AbstractTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $ownerId  = $context->ownerUserId ?? $userId;
-        $runnerId = $context->runnerUserId ?? $userId;
+        if ($context === null) {
+            // No PrincipalContext was supplied — the orchestrator always should
+            // pass one when available. PHP 8.4 throws a fatal Error on null
+            // property access; PHP 8.5 silently coerces. Mirror the canonical
+            // AgentTool null-check so we work on both PHP versions.
+            $ownerId  = $userId;
+            $runnerId = $userId;
+        } else {
+            $ownerId  = $context->ownerUserId ?? $userId;
+            $runnerId = $context->runnerUserId ?? $userId;
+        }
 
         $operation = (string) ($arguments['action'] ?? 'generate');
         return match ($operation) {
@@ -147,11 +157,11 @@ final class MuseImageGenerationTool extends AbstractTool
         }
 
         $imageUrls = [];
-        foreach ($inputImages as $resolved) {
-            if (!is_string($resolved) || trim($resolved) === '') {
+        foreach ($inputImages as $entry) {
+            if (!is_string($entry) || trim($entry) === '') {
                 continue;
             }
-            $imageUrls[] = $resolved;
+            $imageUrls[] = $entry;
         }
         if ($imageUrls === []) {
             return new ToolResult(false, 'edit requires at least one non-empty `input_images` entry.');
@@ -279,11 +289,13 @@ final class MuseImageGenerationTool extends AbstractTool
     /** @param mixed $hint */
     private function mimeFromOutputFormat(mixed $hint): string
     {
-        return match (true) {
-            is_string($hint) && str_contains($hint, 'jpeg'),
-            is_string($hint) && str_contains($hint, 'jpg') => 'image/jpeg',
-            is_string($hint) && str_contains($hint, 'webp') => 'image/webp',
-            is_string($hint) && str_contains($hint, 'png') => 'image/png',
+        if (!is_string($hint)) {
+            return self::MIME_FALLBACK;
+        }
+        return match (strtolower($hint)) {
+            'png' => self::MIME_FALLBACK,
+            'jpeg', 'jpg' => 'image/jpeg',
+            'webp' => 'image/webp',
             default => self::MIME_FALLBACK,
         };
     }
@@ -296,7 +308,7 @@ final class MuseImageGenerationTool extends AbstractTool
         }
         $archive = $this->mediaArchive;
         if (!$archive instanceof MediaArchiveService) {
-            return 'data:' . $mime . ';base64,' . $base64;
+            return $this->dataUri($mime, $base64);
         }
         $ext = $this->extensionForMime($mime);
         $archiveFilename = $filename !== null
@@ -313,20 +325,31 @@ final class MuseImageGenerationTool extends AbstractTool
                 prompt: $prompt,
                 filename: $archiveFilename,
             ));
-            return (string) $asset->asset_url;
-        } catch (Throwable) {
-            return 'data:' . $mime . ';base64,' . $base64;
+            $url = (string) $asset->asset_url;
+            return $url !== '' ? $url : $this->dataUri($mime, $base64);
+        } catch (Throwable $e) {
+            $this->logger?->warning('muse-image.archive-failed', [
+                'exception'    => $e,
+                'mime'         => $mime,
+                'prompt_bytes' => strlen($prompt),
+                'agent_id'     => $agentId,
+            ]);
+            return $this->dataUri($mime, $base64);
         }
+    }
+
+    private function dataUri(string $mime, string $base64): string
+    {
+        return 'data:' . $mime . self::DATA_URI_BASE64_PREFIX . $base64;
     }
 
     private function extensionForMime(string $mime): string
     {
-        return match (true) {
-            str_contains($mime, 'png')  => 'png',
-            str_contains($mime, 'jpeg'),
-            str_contains($mime, 'jpg')  => 'jpg',
-            str_contains($mime, 'webp') => 'webp',
-            default                    => 'png',
+        return match (strtolower($mime)) {
+            self::MIME_FALLBACK => 'png',
+            'image/jpeg' => 'jpg',
+            'image/webp' => 'webp',
+            default      => 'png',
         };
     }
 

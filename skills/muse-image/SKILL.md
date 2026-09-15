@@ -2,10 +2,10 @@
 name: muse-image
 description: 'Generate or edit images with Muse Image (`muse-image-1.0`) via Meta''s OpenAI-compatible images endpoints. Use when the user asks for an "image", "picture", "illustration", "photo", "poster", "thumbnail", "logo", "edit this photo", "restyle", "make it sunset", "remove the background", or any visual that has to be created or changed from a description (and optionally reference images). $0.01 per returned image. Two operations: `generate` (text → 1 image) and `edit` (1+ reference images + prompt → 1 image).'
 license: MIT
-compatibility: spora>=0.7 spora-plugin-muse>=1.0
+compatibility: spora>=0.24 spora-plugin-muse>=0.1
 metadata:
   author: spora-ai
-  version: "1.0"
+  version: "0.1"
 allowed-tools: Spora\Plugins\Muse\Tools\MuseImageGenerationTool
 ---
 
@@ -23,7 +23,7 @@ Both return `{created, data: [{b64_json}], output_format, background, usage}`. T
 | Action     | Endpoint                              | Reference images | Output count |
 | ---------- | ------------------------------------- | ---------------- | ------------ |
 | `generate` | `POST /v1/images/generations`         | none             | always 1     |
-| `edit`     | `POST /v1/images/edits`               | **required**, 1+ | 1+ (depends on `n`) |
+| `edit`     | `POST /v1/images/edits`               | **required**, 1+ | always 1     |
 
 ## Parameters
 

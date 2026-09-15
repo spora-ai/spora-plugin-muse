@@ -1,13 +1,7 @@
 {
     "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
-    "name": "spora-ai/spora-plugin-muse",
     "slug": "muse",
     "description": "Meta Muse vendor home — speech-to-text + image generation today; future Muse Spark text, Muse Glimmer TTS, etc.",
     "class": "Spora\\Plugins\\Muse\\MusePlugin",
-    "icon": "puzzle",
-    "autoload": {
-        "psr-4": {
-            "Spora\\Plugins\\Muse\\": "src/"
-        }
-    }
+    "icon": "puzzle"
 }

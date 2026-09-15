@@ -2,13 +2,18 @@
 
 declare(strict_types=1);
 
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\Tools\MuseImageGenerationTool;
+use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
+
+const TEST_DATA_URI_PNG_PREFIX = 'data:image/png;base64,';
+const TEST_MIME_PNG = 'image/png';
 
 /**
  * @return array{0: MuseImageGenerationTool, 1: MockResponse}
@@ -44,7 +49,7 @@ test('generate posts to /v1/images/generations and returns the b64 image', funct
     expect($result)->toBeInstanceOf(ToolResult::class)
         ->and($result->success)->toBeTrue()
         ->and($result->data['image_urls'])->toHaveCount(1)
-        ->and($result->data['image_urls'][0])->toStartWith('data:image/png;base64,')
+        ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX)
         ->and($result->data['prompt'])->toBe('a cat');
 
     expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/images/generations')
@@ -151,7 +156,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         [
             'action' => 'edit',
             'prompt' => 'make it sunset',
-            'input_images' => ['https://x.test/seed.png', 'data:image/png;base64,AAA'],
+            'input_images' => ['https://x.test/seed.png', TEST_DATA_URI_PNG_PREFIX . 'AAA'],
         ],
         agentId: 1,
         userId: 1,
@@ -169,7 +174,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         ->and($json['model'])->toBe('muse-image-1.0')
         ->and($json['prompt'])->toBe('make it sunset')
         ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
-        ->and($json['images'][1]['image_url'])->toBe('data:image/png;base64,AAA');
+        ->and($json['images'][1]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . 'AAA');
 });
 
 test('edit resolves a Media Archive UUID into an inline data URI on the wire', function (): void {
@@ -187,7 +192,7 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
         static fn(string $id): array => [
             'status' => 'data_url',
             'bytes'  => $png,
-            'mime'   => 'image/png',
+            'mime'   => TEST_MIME_PNG,
         ],
     ));
 
@@ -200,7 +205,7 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
     $options = $response->getRequestOptions();
     $json = json_decode((string) ($options['body'] ?? ''), true);
     expect($json['images'])->toHaveCount(1)
-        ->and($json['images'][0]['image_url'])->toBe('data:image/png;base64,' . base64_encode($png));
+        ->and($json['images'][0]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . base64_encode($png));
 });
 
 test('edit surfaces a failed ToolResult when a UUID does not resolve', function (): void {
@@ -252,7 +257,7 @@ test('generate returns a failed ToolResult when no images are extractable', func
 });
 
 test('generate infers image mime from the output_format field', function (): void {
-    foreach (['png' => 'image/png', 'webp' => 'image/webp', 'jpeg' => 'image/jpeg'] as $fmt => $mime) {
+    foreach (['png' => TEST_MIME_PNG, 'webp' => 'image/webp', 'jpeg' => 'image/jpeg'] as $fmt => $mime) {
         $body = json_encode([
             'data' => [['b64_json' => fakePngB64(8)]],
             'output_format' => $fmt,
@@ -272,4 +277,57 @@ test('describeAction() picks the right label per operation', function (): void {
         ->toBe("Generate image for prompt: 'a cat'");
     expect($tool->describeAction(['action' => 'edit', 'prompt' => 'a cat']))
         ->toBe("Edit image(s) with prompt: 'a cat'");
+});
+
+test('execute tolerates a null PrincipalContext (PHP 8.4 + 8.5)', function (): void {
+    // Mirror the canonical AgentTool null-check in
+    // vendor/spora-ai/spora-core/app/Tools/AgentTool.php:411. PHP 8.4
+    // throws a fatal Error on null property access; PHP 8.5 silently
+    // coerces. Either way, execute() must complete with a ToolResult.
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+    [$tool] = buildImageTool($body);
+
+    $result = $tool->execute(
+        ['action' => 'generate', 'prompt' => 'a cat'],
+        agentId: 1,
+        userId: 1,
+        context: null,
+    );
+
+    expect($result)->toBeInstanceOf(ToolResult::class)
+        ->and($result->success)->toBeTrue();
+});
+
+test('archive() returns a data URI when MediaArchiveService throws (failure is logged, not swallowed)', function (): void {
+    // `MediaArchiveService` is `final` and Mockery can't subclass it.
+    // Build a real instance via reflection (skipping the ctor) so the
+    // `ingest()` call lands on an uninitialised pipeline, which raises
+    // a Throwable — the catch block must convert that into a logged
+    // warning + a fallback data: URI (no escape to ToolInterface::execute).
+    $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-test']);
+    $response = new MockResponse($body, ['http_code' => 200]);
+    $mock = new MockHttpClient([$response]);
+
+    $archive = (new ReflectionClass(MediaArchiveService::class))->newInstanceWithoutConstructor();
+
+    $logger = Mockery::mock(LoggerInterface::class);
+    $logger->shouldReceive('warning')
+        ->once()
+        ->with('muse-image.archive-failed', Mockery::on(function (array $ctx): bool {
+            return $ctx['mime'] === TEST_MIME_PNG
+                && $ctx['prompt_bytes'] === 5
+                && $ctx['agent_id'] === 1
+                && $ctx['exception'] instanceof Throwable;
+        }));
+
+    $tool = new MuseImageGenerationTool($config, $mock, $logger);
+    $tool->setMediaArchive($archive);
+
+    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX);
 });

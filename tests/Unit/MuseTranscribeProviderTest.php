@@ -356,3 +356,31 @@ test('SPORA_FFMPEG_BINARY env var wins over bare "ffmpeg" PATH default and surfa
             . '`SPORA_FFMPEG_BINARY` env var to an absolute path.',
         );
 });
+
+test('non-2xx with HTML body surfaces as InvalidAudioException (422), not SpeechToTextException (502)', function (): void {
+    // Meta's gateway returns HTML error pages (not JSON) for some 5xx paths;
+    // distinguishing a parse failure from a transport failure lets the
+    // controller map the former to 422 INVALID_AUDIO (operator can fix the
+    // input) instead of 502 SPEECH_PROVIDER_FAILED (provider-side issue).
+    $provider = buildMuseProvider(
+        ['api_key' => 'sk-test'],
+        '<html>upstream gateway</html>',
+        502,
+    );
+
+    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
+        ->toThrow(InvalidAudioException::class, 'non-JSON body');
+});
+
+test('convertToWavPcm16 does not leak tempnam stubs after a successful transcribe', function (): void {
+    $before = glob(sys_get_temp_dir() . '/spora-muse*') ?: [];
+
+    [$provider] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-test'],
+        json_encode(['transcript' => 'hi']),
+    );
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    $after = glob(sys_get_temp_dir() . '/spora-muse*') ?: [];
+    expect(array_values(array_diff($after, $before)))->toBe([]);
+});
