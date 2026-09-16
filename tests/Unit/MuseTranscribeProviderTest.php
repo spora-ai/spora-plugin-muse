@@ -110,6 +110,71 @@ test('missing API key raises SpeechToTextException with a sanitised message', fu
         ->toThrow(SpeechToTextException::class, 'Meta Model API key is not configured');
 });
 
+test('isConfigured() returns false when bound settings lack an api_key (v2-cascade gate)', function (): void {
+    // The v2 SpeechProviderConfiguration row's `api_key` is empty —
+    // isConfigured() flips to false so the registry filters the
+    // provider out and the transcribe endpoint returns 503 instead of
+    // throwing 502 mid-call. The legacy optimistic default is kept for
+    // the no-bound path so v1 `tool_user_settings` operators don't
+    // regress.
+    $provider = buildMuseProvider([]);
+    $provider->bindSettings(['api_key' => '']);
+    expect($provider->isConfigured())->toBeFalse();
+
+    $provider->bindSettings(['api_key' => '   ']);
+    expect($provider->isConfigured())->toBeFalse();
+
+    $provider->bindSettings(['display_name' => 'no-key-here']);
+    expect($provider->isConfigured())->toBeFalse();
+
+    $provider->bindSettings(['api_key' => 'sk-from-v2']);
+    expect($provider->isConfigured())->toBeTrue();
+});
+
+test('bindSettings() overrides ToolConfigService for transcribe()', function (): void {
+    // The v2-cascade path: registry resolved a
+    // SpeechProviderConfiguration with api_key 'sk-from-v2' and pushed
+    // it into bindSettings(). transcribe() must use that key, not the
+    // one ToolConfigService would have returned (which here is a stale
+    // 'sk-from-v1').
+    [$provider, $capturing] = buildMuseProviderWithResponse(
+        ['api_key' => 'sk-from-v1'],
+        json_encode([
+            'sessionId'   => 's-1',
+            'transcript'  => 'v2 path',
+            'audioDurationMs' => 500,
+            'turns'       => [],
+        ]),
+    );
+    $provider->bindSettings(['api_key' => 'sk-from-v2']);
+
+    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+
+    expect($capturing->capturedHeaders)->toHaveKey('Authorization')
+        ->and($capturing->capturedHeaders['Authorization'])->toBe('Bearer sk-from-v2')
+        ->and($capturing->capturedHeaders)->not->toContain('sk-from-v1');
+});
+
+test('bindSettings() exposes decoded settings via boundSettings() accessor', function (): void {
+    $provider = buildMuseProvider([]);
+    $provider->bindSettings([
+        'api_key' => 'sk-x',
+        'mode'    => 'DIARIZATION',
+        'model'   => 'muse-voice-transcribe-1.0',
+    ]);
+
+    expect($provider->boundSettings())->toBe([
+        'api_key' => 'sk-x',
+        'mode'    => 'DIARIZATION',
+        'model'   => 'muse-voice-transcribe-1.0',
+    ]);
+});
+
+test('boundSettings() returns [] when bindSettings() never fires (legacy v1 path)', function (): void {
+    $provider = buildMuseProvider([]);
+    expect($provider->boundSettings())->toBe([]);
+});
+
 test('audio larger than 32 MB cap raises InvalidAudioException before any work', function (): void {
     $provider = buildMuseProvider(['api_key' => 'sk-test']);
     $hugeBytes = str_repeat('x', 33 * 1024 * 1024);
