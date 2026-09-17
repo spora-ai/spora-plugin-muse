@@ -23,11 +23,11 @@ use Throwable;
  * without ever violating {@see \Spora\Tools\ToolInterface::execute()}'s
  * "MUST NOT throw" contract.
  *
- * The service is stateless w.r.t. the archive: the caller hands the
- * (possibly null) {@see MediaArchiveService} in on each call so the
- * tool can keep its setter-based injection seam (used by tests and
- * by {@see \Spora\Plugins\Muse\MusePlugin::onContainerBuilding()})
- * without needing a separate DI binding for this helper.
+ * The {@see MediaArchiveService} handle is taken via the constructor
+ * so the {@see archiveBlock()} signature stays short (Sonar `php:S107`).
+ * The tool constructs a fresh service on first use, so any subsequent
+ * setter changes on the tool pick up at the next {@see archiveBlock()}
+ * call.
  */
 final class MuseImageArchiveService
 {
@@ -36,6 +36,7 @@ final class MuseImageArchiveService
 
     public function __construct(
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?MediaArchiveService $archive = null,
     ) {}
 
     /**
@@ -43,11 +44,8 @@ final class MuseImageArchiveService
      * (transport, ingest, malformed bytes, even unexpected errors) the
      * call still resolves to a `data:` URI so the surrounding tool
      * returns a successful {@see \Spora\Tools\ValueObjects\ToolResult}.
-     *
-     * @param ?MediaArchiveService $archive  null disables ingestion and falls straight back to a data: URI.
      */
     public function archiveBlock(
-        ?MediaArchiveService $archive,
         string $base64,
         string $mime,
         string $prompt,
@@ -56,7 +54,7 @@ final class MuseImageArchiveService
         ?int $runnerId,
     ): string {
         try {
-            return $this->archive($archive, $base64, $mime, $prompt, $filename, $agentId, $runnerId, 0);
+            return $this->archive($base64, $mime, $prompt, $filename, $agentId, $runnerId, 0);
         } catch (MuseImageException $e) {
             // MuseImagePayloadException subclasses MuseImageException,
             // so this single arm covers both — Sonar `php:S5713`.
@@ -85,7 +83,6 @@ final class MuseImageArchiveService
      * fallback, so callers can rely on this method never throwing.
      */
     private function archive(
-        ?MediaArchiveService $archive,
         string $base64,
         string $mime,
         string $prompt,
@@ -94,7 +91,7 @@ final class MuseImageArchiveService
         ?int $runnerId,
         int $index,
     ): string {
-        if (!$archive instanceof MediaArchiveService) {
+        if (!$this->archive instanceof MediaArchiveService) {
             return $this->dataUri($mime, $base64);
         }
         $ext = $this->extensionForMime($mime);
@@ -106,7 +103,7 @@ final class MuseImageArchiveService
             if ($bytes === false) {
                 throw new MuseImagePayloadException('Muse Image returned invalid base64 image data.');
             }
-            $asset = $archive->ingest(new MediaIngestRequest(
+            $asset = $this->archive->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: $mime,
                 agentId: $agentId,

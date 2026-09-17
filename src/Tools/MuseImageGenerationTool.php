@@ -277,10 +277,12 @@ final class MuseImageGenerationTool extends AbstractTool
         // into data: URI fallbacks inside `MuseImageArchiveService` so
         // the surrounding `execute()` never throws — ToolInterface
         // contractually forbids it.
-        $archiveService = $this->archiveService ??= new MuseImageArchiveService($this->logger);
+        $archiveService = $this->archiveService ??= new MuseImageArchiveService(
+            $this->logger,
+            $this->mediaArchive,
+        );
         foreach ($imageBlocks as $block) {
             $urls[] = $archiveService->archiveBlock(
-                $this->mediaArchive,
                 $block['b64'],
                 $block['mime'],
                 $prompt,
