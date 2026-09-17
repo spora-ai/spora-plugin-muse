@@ -281,10 +281,12 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
     }
 
     /**
-     * Resolve the ffmpeg binary path: env var first (shell-set on PHP-FPM
-     * most reliably surfaces via getenv; $_ENV is empty for shell-set vars
-     * but is the right read for vars loaded from a .env via vlucas/dotenv),
-     * then fall back to `ffmpeg` on `$PATH`.
+     * Resolve the ffmpeg binary path. `getenv()` is the right read for
+     * shell-exported vars (e.g. `export SPORA_FFMPEG_BINARY=...` in the
+     * Sora service unit, which on PHP-FPM is what populates the per-pool
+     * environment). `$_ENV` is the right read for vars loaded by a
+     * `.env` loader such as vlucas/dotenv, which doesn't propagate to the
+     * OS-level getenv table. Falls back to `ffmpeg` on `$PATH`.
      */
     private function resolveFfmpegBinary(): string
     {

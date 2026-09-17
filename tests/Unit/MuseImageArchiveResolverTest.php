@@ -5,6 +5,10 @@ declare(strict_types=1);
 use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Tools\ValueObjects\ToolResult;
 
+const TEST_UUID = '12345678-1234-1234-1234-123456789abc';
+defined('TEST_MIME_PNG') || define('TEST_MIME_PNG', 'image/png');
+defined('TEST_DATA_URI_PNG_PREFIX') || define('TEST_DATA_URI_PNG_PREFIX', 'data:image/png;base64,');
+
 function makeResolver(?Closure $reader = null): MuseImageArchiveResolver
 {
     $fallback = static fn(string $id, ?int $userId): array => ['status' => 'not_found'];
@@ -12,12 +16,12 @@ function makeResolver(?Closure $reader = null): MuseImageArchiveResolver
 }
 
 test('bare UUID resolves to an inline data URI for data_url payloads', function (): void {
-    $uuid = '12345678-1234-1234-1234-123456789abc';
+    $uuid = TEST_UUID;
     $png = "\x89PNG\r\n\x1a\n" . str_repeat('x', 64);
     $resolver = makeResolver(static function (string $id, ?int $userId) use ($uuid, $png): array {
         expect($id)->toBe($uuid);
         expect($userId)->toBe(42);
-        return ['status' => 'data_url', 'bytes' => $png, 'mime' => 'image/png'];
+        return ['status' => 'data_url', 'bytes' => $png, 'mime' => TEST_MIME_PNG];
     });
 
     $outcome = $resolver->resolve(
@@ -26,7 +30,7 @@ test('bare UUID resolves to an inline data URI for data_url payloads', function 
     );
 
     expect($outcome)->toHaveKey('resolved');
-    expect($outcome['resolved']['input_images'][0])->toBe('data:image/png;base64,' . base64_encode($png));
+    expect($outcome['resolved']['input_images'][0])->toBe(TEST_DATA_URI_PNG_PREFIX . base64_encode($png));
 });
 
 test('opaque /api/v1/assets/<uuid>.<ext> URL resolves to a data URI', function (): void {
@@ -55,23 +59,23 @@ test('http and data: URIs pass through untouched', function (): void {
     $outcome = $resolver->resolve([
         'input_images' => [
             'https://example.com/seed.png',
-            'data:image/png;base64,iVBORw0KGgo=',
+            TEST_DATA_URI_PNG_PREFIX . 'iVBORw0KGgo=',
         ],
     ], 1);
 
     expect($readerCalled)->toBeFalse();
     expect($outcome['resolved']['input_images'])->toBe([
         'https://example.com/seed.png',
-        'data:image/png;base64,iVBORw0KGgo=',
+        TEST_DATA_URI_PNG_PREFIX . 'iVBORw0KGgo=',
     ]);
 });
 
 test('mixed batch: UUID + http URL + opaque URL — each entry handled on its own', function (): void {
-    $uuid = '12345678-1234-1234-1234-123456789abc';
+    $uuid = TEST_UUID;
     $resolver = makeResolver(static fn(string $id): array => [
         'status' => 'data_url',
         'bytes'  => 'png',
-        'mime'   => 'image/png',
+        'mime'   => TEST_MIME_PNG,
     ]);
 
     $outcome = $resolver->resolve([
@@ -83,14 +87,14 @@ test('mixed batch: UUID + http URL + opaque URL — each entry handled on its ow
     ], 7);
 
     expect($outcome['resolved']['input_images'])->toBe([
-        'data:image/png;base64,' . base64_encode('png'),
+        TEST_DATA_URI_PNG_PREFIX . base64_encode('png'),
         'https://example.com/keep.png',
-        'data:image/png;base64,' . base64_encode('png'),
+        TEST_DATA_URI_PNG_PREFIX . base64_encode('png'),
     ]);
 });
 
 test('external source_url payloads are forwarded verbatim (Meta fetches them server-side)', function (): void {
-    $uuid = '12345678-1234-1234-1234-123456789abc';
+    $uuid = TEST_UUID;
     $resolver = makeResolver(static fn(string $id): array => [
         'status'    => 'external',
         'sourceUrl' => 'https://cdn.example.com/asset.png',
@@ -121,11 +125,11 @@ test('oversize payload (over 20 MB) is rejected with a downscaling hint', functi
     $resolver = makeResolver(static fn(): array => [
         'status' => 'local',
         'bytes'  => $oversize,
-        'mime'   => 'image/png',
+        'mime'   => TEST_MIME_PNG,
     ]);
 
     $outcome = $resolver->resolve(
-        ['input_images' => ['12345678-1234-1234-1234-123456789abc']],
+        ['input_images' => [TEST_UUID]],
         1,
     );
 

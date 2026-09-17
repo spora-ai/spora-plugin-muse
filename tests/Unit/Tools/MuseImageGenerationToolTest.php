@@ -12,8 +12,11 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
-const TEST_DATA_URI_PNG_PREFIX = 'data:image/png;base64,';
-const TEST_MIME_PNG = 'image/png';
+defined('TEST_DATA_URI_PNG_PREFIX') || define('TEST_DATA_URI_PNG_PREFIX', 'data:image/png;base64,');
+defined('TEST_MIME_PNG') || define('TEST_MIME_PNG', 'image/png');
+const TEST_PROMPT_CAT = 'a cat';
+const TEST_PROMPT_SUNSET = 'make it sunset';
+const TEST_SEED_URL = 'https://x.test/seed.png';
 
 /**
  * @return array{0: MuseImageGenerationTool, 1: MockResponse}
@@ -44,13 +47,13 @@ test('generate posts to /v1/images/generations and returns the b64 image', funct
     ]);
 
     [$tool, $response] = buildImageTool($body);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
 
     expect($result)->toBeInstanceOf(ToolResult::class)
         ->and($result->success)->toBeTrue()
         ->and($result->data['image_urls'])->toHaveCount(1)
         ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX)
-        ->and($result->data['prompt'])->toBe('a cat');
+        ->and($result->data['prompt'])->toBe(TEST_PROMPT_CAT);
 
     expect($response->getRequestUrl())->toBe('https://api.meta.ai/v1/images/generations')
         ->and($response->getRequestMethod())->toBe('POST');
@@ -85,7 +88,7 @@ test('generate honours the model ToolSetting (operator-overridable model name)',
         'api_key' => 'sk-test',
         'model'   => 'meta/muse-image-1.0',
     ]);
-    $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+    $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
 
     $options = $response->getRequestOptions();
     $json = json_decode((string) ($options['body'] ?? ''), true);
@@ -100,7 +103,7 @@ test('generate falls back to the default model when the setting is empty or whit
             'api_key' => 'sk-test',
             'model'   => $empty,
         ]);
-        $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+        $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
 
         $options = $response->getRequestOptions();
         $json = json_decode((string) ($options['body'] ?? ''), true);
@@ -113,7 +116,7 @@ test('generate normalises an unknown size to 1024x1024', function (): void {
 
     [$tool, $response] = buildImageTool($body);
     $tool->execute(
-        ['action' => 'generate', 'prompt' => 'a cat', 'size' => '9999x9999'],
+        ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT, 'size' => '9999x9999'],
         agentId: 1,
         userId: 1,
     );
@@ -132,7 +135,7 @@ test('generate fails cleanly on empty prompt', function (): void {
 
 test('generate fails when API key is missing', function (): void {
     [$tool] = buildImageTool('{}', settings: []);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Meta Model API key is not configured');
 });
@@ -140,7 +143,7 @@ test('generate fails when API key is missing', function (): void {
 test('edit requires both prompt and input_images', function (): void {
     [$tool] = buildImageTool('{}');
 
-    $missingImage = $tool->execute(['action' => 'edit', 'prompt' => 'a cat'], agentId: 1);
+    $missingImage = $tool->execute(['action' => 'edit', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
     expect($missingImage->success)->toBeFalse()
         ->and($missingImage->content)->toContain('requires both `prompt` and at least one');
 
@@ -155,8 +158,8 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
     $result = $tool->execute(
         [
             'action' => 'edit',
-            'prompt' => 'make it sunset',
-            'input_images' => ['https://x.test/seed.png', TEST_DATA_URI_PNG_PREFIX . 'AAA'],
+            'prompt' => TEST_PROMPT_SUNSET,
+            'input_images' => [TEST_SEED_URL, TEST_DATA_URI_PNG_PREFIX . 'AAA'],
         ],
         agentId: 1,
         userId: 1,
@@ -172,8 +175,8 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
     expect($json)->not->toBeNull()
         ->and($json)->not->toHaveKey('messages')
         ->and($json['model'])->toBe('muse-image-1.0')
-        ->and($json['prompt'])->toBe('make it sunset')
-        ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
+        ->and($json['prompt'])->toBe(TEST_PROMPT_SUNSET)
+        ->and($json['images'][0]['image_url'])->toBe(TEST_SEED_URL)
         ->and($json['images'][1]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . 'AAA');
 });
 
@@ -197,7 +200,7 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
     ));
 
     $tool->execute(
-        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => [$uuid]],
+        ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => [$uuid]],
         agentId: 1,
         userId: 1,
     );
@@ -219,7 +222,7 @@ test('edit surfaces a failed ToolResult when a UUID does not resolve', function 
     ));
 
     $result = $tool->execute(
-        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => ['00000000-0000-0000-0000-000000000000']],
+        ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => ['00000000-0000-0000-0000-000000000000']],
         agentId: 1,
         userId: 1,
     );
@@ -231,7 +234,7 @@ test('edit surfaces a failed ToolResult when a UUID does not resolve', function 
 test('edit rejects when every input_images entry is empty', function (): void {
     [$tool] = buildImageTool('{}');
     $result = $tool->execute(
-        ['action' => 'edit', 'prompt' => 'make it sunset', 'input_images' => ['', '   ']],
+        ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => ['', '   ']],
         agentId: 1,
     );
     expect($result->success)->toBeFalse()
@@ -240,7 +243,7 @@ test('edit rejects when every input_images entry is empty', function (): void {
 
 test('generate returns a failed ToolResult when the upstream returns 502', function (): void {
     [$tool] = buildImageTool('{"error":{"message":"upstream is sad"}}', status: 502);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Image generation failed')
@@ -250,7 +253,7 @@ test('generate returns a failed ToolResult when the upstream returns 502', funct
 test('generate returns a failed ToolResult when no images are extractable', function (): void {
     $body = json_encode(['created' => 1, 'data' => [], 'output_format' => 'webp']);
     [$tool] = buildImageTool($body);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Muse Image returned no images');
@@ -264,7 +267,7 @@ test('generate infers image mime from the output_format field', function (): voi
         ]);
 
         [$tool] = buildImageTool($body);
-        $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1);
+        $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['image_urls'][0])->toStartWith('data:' . $mime . ';base64,');
@@ -273,10 +276,27 @@ test('generate infers image mime from the output_format field', function (): voi
 
 test('describeAction() picks the right label per operation', function (): void {
     [$tool] = buildImageTool('{}');
-    expect($tool->describeAction(['action' => 'generate', 'prompt' => 'a cat']))
-        ->toBe("Generate image for prompt: 'a cat'");
-    expect($tool->describeAction(['action' => 'edit', 'prompt' => 'a cat']))
-        ->toBe("Edit image(s) with prompt: 'a cat'");
+    expect($tool->describeAction(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT]))
+        ->toBe("Generate image for prompt: '" . TEST_PROMPT_CAT . "'");
+    expect($tool->describeAction(['action' => 'edit', 'prompt' => TEST_PROMPT_CAT]))
+        ->toBe("Edit image(s) with prompt: '" . TEST_PROMPT_CAT . "'");
+});
+
+test('renderResponse labels the heading with the correct verb per operation', function (): void {
+    // The edit path used to print "Generated image" regardless of the
+    // operation, misleading operators reviewing the chat transcript.
+    foreach (['generate' => 'Generated', 'edit' => 'Edited'] as $action => $verb) {
+        $body = json_encode(['data' => [['b64_json' => fakePngB64(16)]]]);
+        [$tool] = buildImageTool($body);
+
+        $callArgs = $action === 'edit'
+            ? ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => [TEST_SEED_URL]]
+            : ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT];
+        $result = $tool->execute($callArgs, agentId: 1, userId: 1);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->content)->toContain("{$verb} image —");
+    }
 });
 
 test('execute tolerates a null PrincipalContext (PHP 8.4 + 8.5)', function (): void {
@@ -288,7 +308,7 @@ test('execute tolerates a null PrincipalContext (PHP 8.4 + 8.5)', function (): v
     [$tool] = buildImageTool($body);
 
     $result = $tool->execute(
-        ['action' => 'generate', 'prompt' => 'a cat'],
+        ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT],
         agentId: 1,
         userId: 1,
         context: null,
@@ -326,7 +346,7 @@ test('archive() returns a data URI when MediaArchiveService throws (failure is l
     $tool = new MuseImageGenerationTool($config, $mock, $logger);
     $tool->setMediaArchive($archive);
 
-    $result = $tool->execute(['action' => 'generate', 'prompt' => 'a cat'], agentId: 1, userId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
 
     expect($result->success)->toBeTrue()
         ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX);

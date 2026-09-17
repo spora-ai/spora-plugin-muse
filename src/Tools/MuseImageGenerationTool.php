@@ -8,9 +8,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\MuseImageException;
 use Spora\Plugins\Muse\MuseImageHttpClient;
-use Spora\Plugins\Muse\MuseImagePayloadException;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
@@ -21,7 +19,6 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\MediaEmbed;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Throwable;
 
 #[Tool(
     name: 'image_muse',
@@ -44,11 +41,11 @@ final class MuseImageGenerationTool extends AbstractTool
     private const DEFAULT_TIMEOUT_SECONDS = 300;
     private const DEFAULT_MODEL = 'muse-image-1.0';
     private const MIME_FALLBACK = 'image/png';
-    private const DATA_URI_BASE64_PREFIX = ';base64,';
 
     private ?LoggerInterface $logger;
     private ?MediaArchiveService $mediaArchive = null;
     private ?MuseImageArchiveResolver $imageArchiveResolver = null;
+    private ?MuseImageArchiveService $archiveService = null;
 
     public function __construct(
         private readonly ToolConfigService $configService,
@@ -112,52 +109,70 @@ final class MuseImageGenerationTool extends AbstractTool
     /** @param array<string, mixed> $arguments */
     private function generate(array $arguments, int $agentId, ?int $ownerId, ?int $runnerId): ToolResult
     {
-        $prompt = trim((string) ($arguments['prompt'] ?? ''));
-        if ($prompt === '') {
-            return new ToolResult(false, 'Prompt cannot be empty.');
+        $failure = $this->validateGenerateArguments($arguments);
+        if ($failure !== null) {
+            return $failure;
         }
-
-        $client = $this->resolveClient($agentId, $ownerId);
-        if ($client instanceof ToolResult) {
-            return $client;
-        }
-
-        $size = MuseImageHttpClient::normaliseSize($arguments['size'] ?? null);
-
-        try {
-            $response = $client->generate($prompt, $size);
-        } catch (MuseImageException $e) {
-            $this->logger?->error('muse-image.generate failed', ['exception' => $e]);
-            return new ToolResult(false, 'Image generation failed: ' . $e->getMessage());
-        }
-
-        return $this->renderResponse($response, $prompt, $arguments, $agentId, $runnerId);
+        return $this->runGenerateHttp($arguments, $agentId, $ownerId, $runnerId);
     }
 
     /** @param array<string, mixed> $arguments */
     private function edit(array $arguments, int $agentId, ?int $ownerId, ?int $runnerId): ToolResult
     {
+        $failure = $this->validateEditArguments($arguments);
+        if ($failure !== null) {
+            return $failure;
+        }
+        $inputImages = $this->resolveAndFilterInputImages($arguments, $runnerId);
+        if ($inputImages instanceof ToolResult) {
+            return $inputImages;
+        }
+        return $this->dispatchEditHttp($arguments, $inputImages, $agentId, $ownerId, $runnerId);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function validateGenerateArguments(array $arguments): ?ToolResult
+    {
+        if (trim((string) ($arguments['prompt'] ?? '')) === '') {
+            return new ToolResult(false, 'Prompt cannot be empty.');
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function validateEditArguments(array $arguments): ?ToolResult
+    {
         $prompt = trim((string) ($arguments['prompt'] ?? ''));
         $inputImages = $arguments['input_images'] ?? [];
-
         if ($prompt === '' || !is_array($inputImages) || $inputImages === []) {
             return new ToolResult(false, 'edit requires both `prompt` and at least one `input_images` entry.');
         }
+        return null;
+    }
 
-        // Resolve Media Archive UUIDs → inline data URIs (or forward
-        // external source URLs) before the empty/whitespace filter and
-        // the Meta call. Surfaces "asset not found" failures cleanly.
+    /**
+     * Resolve Media Archive UUIDs → inline data URIs (or forward external
+     * source URLs) and drop empty/whitespace entries before the Meta call.
+     * Surfaces "asset not found" failures cleanly to the LLM.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return list<string>|ToolResult
+     */
+    private function resolveAndFilterInputImages(array $arguments, ?int $runnerId): array|ToolResult
+    {
         if ($this->imageArchiveResolver !== null) {
             $resolved = $this->imageArchiveResolver->resolve($arguments, $runnerId);
             if (isset($resolved['failed'])) {
                 return $resolved['failed'];
             }
             $arguments = $resolved['resolved'];
-            $inputImages = $arguments['input_images'];
         }
-
         $imageUrls = [];
-        foreach ($inputImages as $entry) {
+        foreach ($arguments['input_images'] as $entry) {
             if (!is_string($entry) || trim($entry) === '') {
                 continue;
             }
@@ -166,22 +181,46 @@ final class MuseImageGenerationTool extends AbstractTool
         if ($imageUrls === []) {
             return new ToolResult(false, 'edit requires at least one non-empty `input_images` entry.');
         }
+        return $imageUrls;
+    }
 
+    /** @param array<string, mixed> $arguments */
+    private function runGenerateHttp(array $arguments, int $agentId, ?int $ownerId, ?int $runnerId): ToolResult
+    {
+        $prompt = trim((string) $arguments['prompt']);
         $client = $this->resolveClient($agentId, $ownerId);
         if ($client instanceof ToolResult) {
             return $client;
         }
-
         $size = MuseImageHttpClient::normaliseSize($arguments['size'] ?? null);
-
         try {
-            $response = $client->edit($prompt, $imageUrls, $size);
+            $response = $client->generate($prompt, $size);
+        } catch (MuseImageException $e) {
+            $this->logger?->error('muse-image.generate failed', ['exception' => $e]);
+            return new ToolResult(false, 'Image generation failed: ' . $e->getMessage());
+        }
+        return $this->renderResponse($response, $prompt, $arguments, $agentId, $runnerId, 'generate');
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @param list<string>          $inputImages
+     */
+    private function dispatchEditHttp(array $arguments, array $inputImages, int $agentId, ?int $ownerId, ?int $runnerId): ToolResult
+    {
+        $prompt = trim((string) $arguments['prompt']);
+        $client = $this->resolveClient($agentId, $ownerId);
+        if ($client instanceof ToolResult) {
+            return $client;
+        }
+        $size = MuseImageHttpClient::normaliseSize($arguments['size'] ?? null);
+        try {
+            $response = $client->edit($prompt, $inputImages, $size);
         } catch (MuseImageException $e) {
             $this->logger?->error('muse-image.edit failed', ['exception' => $e]);
             return new ToolResult(false, 'Image edit failed: ' . $e->getMessage());
         }
-
-        return $this->renderResponse($response, $prompt, $arguments, $agentId, $runnerId);
+        return $this->renderResponse($response, $prompt, $arguments, $agentId, $runnerId, 'edit');
     }
 
     /**
@@ -217,7 +256,7 @@ final class MuseImageGenerationTool extends AbstractTool
      * @param array<string, mixed> $response
      * @param array<string, mixed> $arguments
      */
-    private function renderResponse(array $response, string $prompt, array $arguments, int $agentId, ?int $runnerId): ToolResult
+    private function renderResponse(array $response, string $prompt, array $arguments, int $agentId, ?int $runnerId, string $operation): ToolResult
     {
         $imageBlocks = $this->extractImages($response);
 
@@ -233,21 +272,35 @@ final class MuseImageGenerationTool extends AbstractTool
             : null;
 
         $urls = [];
-        foreach ($imageBlocks as $index => $block) {
-            $filename = $filenameStem !== null && count($imageBlocks) > 1
-                ? $filenameStem . '-' . ($index + 1)
-                : $filenameStem;
-            $urls[] = $this->archive($block['b64'], $block['mime'], $prompt, $filename, $agentId, $runnerId, $index);
+        // Meta contract guarantees one image per call; we still loop to
+        // stay forward-compatible. Archive ingest failures are converted
+        // into data: URI fallbacks inside `MuseImageArchiveService` so
+        // the surrounding `execute()` never throws — ToolInterface
+        // contractually forbids it.
+        $archiveService = $this->archiveService ??= new MuseImageArchiveService(
+            $this->logger,
+            $this->mediaArchive,
+        );
+        foreach ($imageBlocks as $block) {
+            $urls[] = $archiveService->archiveBlock(
+                $block['b64'],
+                $block['mime'],
+                $prompt,
+                $filenameStem,
+                $agentId,
+                $runnerId,
+            );
         }
 
         $count = count($urls);
         $summary = $this->summarizePrompt($prompt);
+        $verb = $operation === 'edit' ? 'Edited' : 'Generated';
         $heading = $count === 1
-            ? "Generated image — {$summary}"
-            : "Generated {$count} images — {$summary}";
+            ? "{$verb} image — {$summary}"
+            : "{$verb} {$count} images — {$summary}";
         $content = $heading . "\n\n";
         $content .= implode("\n\n", array_map(
-            static fn(int $i, string $url): string => MediaEmbed::image($url, 'Generated image ' . ($i + 1)),
+            static fn(int $i, string $url): string => MediaEmbed::image($url, "{$verb} image " . ($i + 1)),
             array_keys($urls),
             $urls,
         ));
@@ -297,59 +350,6 @@ final class MuseImageGenerationTool extends AbstractTool
             'jpeg', 'jpg' => 'image/jpeg',
             'webp' => 'image/webp',
             default => self::MIME_FALLBACK,
-        };
-    }
-
-    private function archive(string $base64, string $mime, string $prompt, ?string $filename, int $agentId, ?int $runnerId, int $index): string
-    {
-        $bytes = base64_decode($base64, true);
-        if ($bytes === false) {
-            throw new MuseImagePayloadException('Muse Image returned invalid base64 image data.');
-        }
-        $archive = $this->mediaArchive;
-        if (!$archive instanceof MediaArchiveService) {
-            return $this->dataUri($mime, $base64);
-        }
-        $ext = $this->extensionForMime($mime);
-        $archiveFilename = $filename !== null
-            ? $filename . '.' . $ext
-            : 'muse-image-' . ($index + 1) . '.' . $ext;
-        try {
-            $asset = $archive->ingest(new MediaIngestRequest(
-                bytes: $bytes,
-                mime: $mime,
-                agentId: $agentId,
-                userId: $runnerId,
-                pluginSlug: 'muse',
-                toolName: 'image',
-                prompt: $prompt,
-                filename: $archiveFilename,
-            ));
-            $url = (string) $asset->asset_url;
-            return $url !== '' ? $url : $this->dataUri($mime, $base64);
-        } catch (Throwable $e) {
-            $this->logger?->warning('muse-image.archive-failed', [
-                'exception'    => $e,
-                'mime'         => $mime,
-                'prompt_bytes' => strlen($prompt),
-                'agent_id'     => $agentId,
-            ]);
-            return $this->dataUri($mime, $base64);
-        }
-    }
-
-    private function dataUri(string $mime, string $base64): string
-    {
-        return 'data:' . $mime . self::DATA_URI_BASE64_PREFIX . $base64;
-    }
-
-    private function extensionForMime(string $mime): string
-    {
-        return match (strtolower($mime)) {
-            self::MIME_FALLBACK => 'png',
-            'image/jpeg' => 'jpg',
-            'image/webp' => 'webp',
-            default      => 'png',
         };
     }
 
