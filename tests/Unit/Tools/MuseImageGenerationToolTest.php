@@ -16,6 +16,7 @@ defined('TEST_DATA_URI_PNG_PREFIX') || define('TEST_DATA_URI_PNG_PREFIX', 'data:
 defined('TEST_MIME_PNG') || define('TEST_MIME_PNG', 'image/png');
 const TEST_PROMPT_CAT = 'a cat';
 const TEST_PROMPT_SUNSET = 'make it sunset';
+const TEST_SEED_URL = 'https://x.test/seed.png';
 
 /**
  * @return array{0: MuseImageGenerationTool, 1: MockResponse}
@@ -158,7 +159,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         [
             'action' => 'edit',
             'prompt' => TEST_PROMPT_SUNSET,
-            'input_images' => ['https://x.test/seed.png', TEST_DATA_URI_PNG_PREFIX . 'AAA'],
+            'input_images' => [TEST_SEED_URL, TEST_DATA_URI_PNG_PREFIX . 'AAA'],
         ],
         agentId: 1,
         userId: 1,
@@ -175,7 +176,7 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
         ->and($json)->not->toHaveKey('messages')
         ->and($json['model'])->toBe('muse-image-1.0')
         ->and($json['prompt'])->toBe(TEST_PROMPT_SUNSET)
-        ->and($json['images'][0]['image_url'])->toBe('https://x.test/seed.png')
+        ->and($json['images'][0]['image_url'])->toBe(TEST_SEED_URL)
         ->and($json['images'][1]['image_url'])->toBe(TEST_DATA_URI_PNG_PREFIX . 'AAA');
 });
 
@@ -289,7 +290,7 @@ test('renderResponse labels the heading with the correct verb per operation', fu
         [$tool] = buildImageTool($body);
 
         $callArgs = $action === 'edit'
-            ? ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => ['https://x.test/seed.png']]
+            ? ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => [TEST_SEED_URL]]
             : ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT];
         $result = $tool->execute($callArgs, agentId: 1, userId: 1);
 

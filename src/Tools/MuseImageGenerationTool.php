@@ -8,9 +8,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Plugins\Muse\MuseImageArchiveResolver;
 use Spora\Plugins\Muse\MuseImageException;
 use Spora\Plugins\Muse\MuseImageHttpClient;
-use Spora\Plugins\Muse\MuseImagePayloadException;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
@@ -21,7 +19,6 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\MediaEmbed;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Throwable;
 
 #[Tool(
     name: 'image_muse',
@@ -44,11 +41,11 @@ final class MuseImageGenerationTool extends AbstractTool
     private const DEFAULT_TIMEOUT_SECONDS = 300;
     private const DEFAULT_MODEL = 'muse-image-1.0';
     private const MIME_FALLBACK = 'image/png';
-    private const DATA_URI_BASE64_PREFIX = ';base64,';
 
     private ?LoggerInterface $logger;
     private ?MediaArchiveService $mediaArchive = null;
     private ?MuseImageArchiveResolver $imageArchiveResolver = null;
+    private ?MuseImageArchiveService $archiveService = null;
 
     public function __construct(
         private readonly ToolConfigService $configService,
@@ -276,13 +273,21 @@ final class MuseImageGenerationTool extends AbstractTool
 
         $urls = [];
         // Meta contract guarantees one image per call; we still loop to
-        // stay forward-compatible. The per-block archive is wrapped in a
-        // defensive try/catch — `archive()` already swallows ingest
-        // failures into a data: URI fallback, but we keep a last-resort
-        // Throwable guard so an unexpected escape can never violate
-        // `ToolInterface::execute()`'s "MUST NOT throw" contract.
+        // stay forward-compatible. Archive ingest failures are converted
+        // into data: URI fallbacks inside `MuseImageArchiveService` so
+        // the surrounding `execute()` never throws — ToolInterface
+        // contractually forbids it.
+        $archiveService = $this->archiveService ??= new MuseImageArchiveService($this->logger);
         foreach ($imageBlocks as $block) {
-            $urls[] = $this->archiveBlock($block['b64'], $block['mime'], $prompt, $filenameStem, $agentId, $runnerId);
+            $urls[] = $archiveService->archiveBlock(
+                $this->mediaArchive,
+                $block['b64'],
+                $block['mime'],
+                $prompt,
+                $filenameStem,
+                $agentId,
+                $runnerId,
+            );
         }
 
         $count = count($urls);
@@ -343,89 +348,6 @@ final class MuseImageGenerationTool extends AbstractTool
             'jpeg', 'jpg' => 'image/jpeg',
             'webp' => 'image/webp',
             default => self::MIME_FALLBACK,
-        };
-    }
-
-    private function archive(string $base64, string $mime, string $prompt, ?string $filename, int $agentId, ?int $runnerId, int $index): string
-    {
-        $archive = $this->mediaArchive;
-        if (!$archive instanceof MediaArchiveService) {
-            return $this->dataUri($mime, $base64);
-        }
-        $ext = $this->extensionForMime($mime);
-        $archiveFilename = $filename !== null
-            ? $filename . '.' . $ext
-            : 'muse-image-' . ($index + 1) . '.' . $ext;
-        try {
-            $bytes = base64_decode($base64, true);
-            if ($bytes === false) {
-                throw new MuseImagePayloadException('Muse Image returned invalid base64 image data.');
-            }
-            $asset = $archive->ingest(new MediaIngestRequest(
-                bytes: $bytes,
-                mime: $mime,
-                agentId: $agentId,
-                userId: $runnerId,
-                pluginSlug: 'muse',
-                toolName: 'image',
-                prompt: $prompt,
-                filename: $archiveFilename,
-            ));
-            $url = (string) $asset->asset_url;
-            return $url !== '' ? $url : $this->dataUri($mime, $base64);
-        } catch (Throwable $e) {
-            $this->logger?->warning('muse-image.archive-failed', [
-                'exception'    => $e,
-                'mime'         => $mime,
-                'prompt_bytes' => strlen($prompt),
-                'agent_id'     => $agentId,
-            ]);
-            return $this->dataUri($mime, $base64);
-        }
-    }
-
-    /**
-     * Last-resort defensive wrapper around {@see archive()}. archive()'s
-     * own try/catch already converts ingest failures into a data: URI,
-     * but {@see ToolInterface::execute()} is contractually forbidden from
-     * throwing — if anything escapes we fall back to a data: URI so the
-     * tool call still resolves as a successful `ToolResult`.
-     */
-    private function archiveBlock(string $base64, string $mime, string $prompt, ?string $filename, int $agentId, ?int $runnerId): string
-    {
-        try {
-            return $this->archive($base64, $mime, $prompt, $filename, $agentId, $runnerId, 0);
-        } catch (MuseImageException | MuseImagePayloadException $e) {
-            $this->logger?->warning('muse-image.archive-fallback', [
-                'exception'    => $e,
-                'mime'         => $mime,
-                'prompt_bytes' => strlen($prompt),
-                'agent_id'     => $agentId,
-            ]);
-            return $this->dataUri($mime, $base64);
-        } catch (Throwable $e) {
-            $this->logger?->error('muse-image.archive-unexpected', [
-                'exception'    => $e,
-                'mime'         => $mime,
-                'prompt_bytes' => strlen($prompt),
-                'agent_id'     => $agentId,
-            ]);
-            return $this->dataUri($mime, $base64);
-        }
-    }
-
-    private function dataUri(string $mime, string $base64): string
-    {
-        return 'data:' . $mime . self::DATA_URI_BASE64_PREFIX . $base64;
-    }
-
-    private function extensionForMime(string $mime): string
-    {
-        return match (strtolower($mime)) {
-            self::MIME_FALLBACK => 'png',
-            'image/jpeg' => 'jpg',
-            'image/webp' => 'webp',
-            default      => 'png',
         };
     }
 
