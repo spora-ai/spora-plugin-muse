@@ -77,16 +77,30 @@ final class MuseImageArchiveResolver
      */
     public function resolve(array $arguments, ?int $userId): array
     {
-        if (!array_key_exists('input_images', $arguments)) {
+        if (!$this->hasResolvableImages($arguments)) {
             return ['resolved' => $arguments];
         }
-        $raw = $arguments['input_images'];
-        if (!is_array($raw) || $raw === []) {
-            return ['resolved' => $arguments];
-        }
+        return $this->buildResolvedArguments($arguments, $userId);
+    }
 
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function hasResolvableImages(array $arguments): bool
+    {
+        return array_key_exists('input_images', $arguments)
+            && is_array($arguments['input_images'])
+            && $arguments['input_images'] !== [];
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     * @return array{resolved: array<string, mixed>}|array{failed: ToolResult}
+     */
+    private function buildResolvedArguments(array $arguments, ?int $userId): array
+    {
         $replaced = [];
-        foreach ($raw as $entry) {
+        foreach ($arguments['input_images'] as $entry) {
             if (!is_string($entry)) {
                 $replaced[] = $entry;
                 continue;
@@ -124,10 +138,9 @@ final class MuseImageArchiveResolver
         ]);
 
         return match ($result['status']) {
-            'data_url' => $this->wrapAsDataUri($uuid, (string) $result['bytes'], (string) $result['mime']),
-            'local'    => $this->wrapAsDataUri($uuid, (string) $result['bytes'], (string) $result['mime']),
-            'external' => $this->forwardExternal($uuid, (string) $result['sourceUrl']),
-            default    => ['failed' => $this->notFoundFailure($uuid)],
+            'data_url', 'local' => $this->wrapAsDataUri($uuid, (string) $result['bytes'], (string) $result['mime']),
+            'external'          => $this->forwardExternal($uuid, (string) $result['sourceUrl']),
+            default             => ['failed' => $this->notFoundFailure($uuid)],
         };
     }
 

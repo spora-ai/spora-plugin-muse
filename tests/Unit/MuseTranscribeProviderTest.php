@@ -12,6 +12,10 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
+const TEST_MIME_WAV = 'audio/wav';
+const TEST_SESSION_ID = '9f1c-abc';
+const TEST_TRANSCRIPT_WEATHER = 'How is the weather? It is raining.';
+
 /**
  * Test-only HttpClient that captures the request body BEFORE Symfony's
  * `prepareRequest()` normalises it. Mirrors `OaiCapturingHttpClient` in
@@ -106,7 +110,7 @@ test('getDisplayName() falls back to the class default when bindLabel() never fi
 test('missing API key raises SpeechToTextException with a sanitised message', function (): void {
     $provider = buildMuseProvider([]);
 
-    expect(fn() => $provider->transcribe('fake', 'audio/wav'))
+    expect(fn() => $provider->transcribe('fake', TEST_MIME_WAV))
         ->toThrow(SpeechToTextException::class, 'Meta Model API key is not configured');
 });
 
@@ -148,7 +152,7 @@ test('bindSettings() overrides ToolConfigService for transcribe()', function ():
     );
     $provider->bindSettings(['api_key' => 'sk-from-v2']);
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     expect($capturing->capturedHeaders)->toHaveKey('Authorization')
         ->and($capturing->capturedHeaders['Authorization'])->toBe('Bearer sk-from-v2')
@@ -179,7 +183,7 @@ test('audio larger than 32 MB cap raises InvalidAudioException before any work',
     $provider = buildMuseProvider(['api_key' => 'sk-test']);
     $hugeBytes = str_repeat('x', 33 * 1024 * 1024);
 
-    expect(fn() => $provider->transcribe($hugeBytes, 'audio/wav'))
+    expect(fn() => $provider->transcribe($hugeBytes, TEST_MIME_WAV))
         ->toThrow(InvalidAudioException::class, 'exceeds Meta Muse 32 MB file cap');
 });
 
@@ -207,19 +211,19 @@ test('happy path parses transcript + audioDurationMs + session_id from Meta wire
     [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK'],
         json_encode([
-            'sessionId' => '9f1c-abc',
-            'transcript' => 'How is the weather? It is raining.',
+            'sessionId' => TEST_SESSION_ID,
+            'transcript' => TEST_TRANSCRIPT_WEATHER,
             'audioDurationMs' => 8240,
             'turns' => [],
         ]),
     );
 
-    $result = $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $result = $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
-    expect($result->text)->toBe('How is the weather? It is raining.')
+    expect($result->text)->toBe(TEST_TRANSCRIPT_WEATHER)
         ->and($result->language)->toBeNull()
         ->and($result->durationMs)->toBe(8240.0)
-        ->and($result->metadata['session_id'])->toBe('9f1c-abc')
+        ->and($result->metadata['session_id'])->toBe(TEST_SESSION_ID)
         ->and($result->metadata['mode'])->toBe('PUSH_TO_TALK')
         ->and($result->metadata['turns'])->toBe([]);
 
@@ -231,8 +235,8 @@ test('DIARIZATION mode surfaces turns[] in metadata', function (): void {
     $provider = buildMuseProvider(
         ['api_key' => 'sk-test', 'mode' => 'DIARIZATION'],
         json_encode([
-            'sessionId' => '9f1c-abc',
-            'transcript' => 'How is the weather? It is raining.',
+            'sessionId' => TEST_SESSION_ID,
+            'transcript' => TEST_TRANSCRIPT_WEATHER,
             'audioDurationMs' => 8240,
             'turns' => [
                 ['turnId' => 1, 'startMs' => 1520, 'endMs' => 4640, 'transcript' => 'How is the weather?', 'speaker' => 'A'],
@@ -241,7 +245,7 @@ test('DIARIZATION mode surfaces turns[] in metadata', function (): void {
         ]),
     );
 
-    $result = $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $result = $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     expect($result->metadata['mode'])->toBe('DIARIZATION')
         ->and($result->metadata['turns'])->toHaveCount(2)
@@ -258,14 +262,14 @@ test('body contains a request blob + audio resource, headers carry Bearer', func
     [$provider, $capturing] = buildMuseProviderWithResponse(
         ['api_key' => 'sk-test', 'mode' => 'PUSH_TO_TALK'],
         json_encode([
-            'sessionId' => '9f1c-abc',
+            'sessionId' => TEST_SESSION_ID,
             'transcript' => 'hello world',
             'audioDurationMs' => 1234,
             'turns' => [],
         ]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $body = $options['body'] ?? null;
@@ -301,7 +305,7 @@ test('model ToolSetting overrides the default in the request blob', function ():
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -315,7 +319,7 @@ test('empty / whitespace model setting falls back to the default model', functio
             json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
         );
 
-        $provider->transcribe(tinySilenceWav(), 'audio/wav');
+        $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
         $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
         $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -329,7 +333,7 @@ test('language_bias setting is serialised as languageBias in the request blob', 
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -348,7 +352,7 @@ test('language_bias setting decodes the JSON string the multi-select form posts'
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -361,7 +365,7 @@ test('keywords setting flows into the request blob', function (): void {
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -374,7 +378,7 @@ test('keywords setting accepts comma-separated text string with whitespace', fun
         json_encode(['sessionId' => 'x', 'transcript' => 'hi', 'audioDurationMs' => 1, 'turns' => []]),
     );
 
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $options = ['body' => $capturing->capturedBody, 'headers' => $capturing->capturedHeaders];
     $decoded = json_decode((string) ($options['body']['request'] ?? ''), true);
@@ -384,14 +388,14 @@ test('keywords setting accepts comma-separated text string with whitespace', fun
 test('empty transcript in response raises InvalidAudioException', function (): void {
     $provider = buildMuseProvider(['api_key' => 'sk-test'], json_encode(['transcript' => '']));
 
-    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
+    expect(fn() => $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV))
         ->toThrow(InvalidAudioException::class, 'Muse STT returned no transcript.');
 });
 
 test('non-2xx HTTP status raises SpeechToTextException', function (): void {
     $provider = buildMuseProvider(['api_key' => 'sk-test'], '{"error":{"message":"unauthorized"}}', 401);
 
-    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
+    expect(fn() => $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV))
         ->toThrow(SpeechToTextException::class);
 });
 
@@ -413,7 +417,7 @@ test('SPORA_FFMPEG_BINARY env var wins over bare "ffmpeg" PATH default and surfa
 
     $provider = buildMuseProvider(['api_key' => 'sk-test']);
 
-    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
+    expect(fn() => $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV))
         ->toThrow(
             SpeechToTextException::class,
             'ffmpeg binary not found at "/spora/muse/test/missing-ffmpeg". Install ffmpeg '
@@ -433,7 +437,7 @@ test('non-2xx with HTML body surfaces as InvalidAudioException (422), not Speech
         502,
     );
 
-    expect(fn() => $provider->transcribe(tinySilenceWav(), 'audio/wav'))
+    expect(fn() => $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV))
         ->toThrow(InvalidAudioException::class, 'non-JSON body');
 });
 
@@ -444,7 +448,7 @@ test('convertToWavPcm16 does not leak tempnam stubs after a successful transcrib
         ['api_key' => 'sk-test'],
         json_encode(['transcript' => 'hi']),
     );
-    $provider->transcribe(tinySilenceWav(), 'audio/wav');
+    $provider->transcribe(tinySilenceWav(), TEST_MIME_WAV);
 
     $after = glob(sys_get_temp_dir() . '/spora-muse*') ?: [];
     expect(array_values(array_diff($after, $before)))->toBe([]);

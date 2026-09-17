@@ -118,7 +118,6 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
         $builder        = $event->builder();
         $archiveService = \DI\get(MediaArchiveService::class);
         $logger         = \DI\get(LoggerInterface::class);
-        $assetReader    = \DI\get(MediaAssetReader::class);
 
         $resolver = \DI\factory(static function (
             MediaAssetReader $reader,
