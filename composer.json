@@ -6,7 +6,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.4.1",
-        "spora-ai/spora-core": "dev-main as 0.24.0",
+        "spora-ai/spora-core": "^0.24.0",
         "symfony/event-dispatcher": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/process": "^8.0"
@@ -43,10 +43,6 @@
             "spora-ai/installer": true
         }
     },
-    "minimum-stability": "dev",
-    "prefer-stable": true,
-    "repositories": [{
-        "type": "vcs",
-        "url": "https://github.com/spora-ai/spora-core.git"
-    }]
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }
