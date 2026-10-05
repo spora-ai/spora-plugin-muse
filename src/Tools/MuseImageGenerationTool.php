@@ -70,6 +70,9 @@ final class MuseImageGenerationTool extends AbstractTool
         $this->logger = $logger;
     }
 
+    /**
+     * @param int|null $userId @deprecated pass $context->ownerUserId instead; removed from the interface in core 0.30.0.
+     */
     public function execute(
         array $arguments,
         int $agentId,
@@ -77,17 +80,10 @@ final class MuseImageGenerationTool extends AbstractTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        if ($context === null) {
-            // No PrincipalContext was supplied — the orchestrator always should
-            // pass one when available. PHP 8.4 throws a fatal Error on null
-            // property access; PHP 8.5 silently coerces. Mirror the canonical
-            // AgentTool null-check so we work on both PHP versions.
-            $ownerId  = $userId;
-            $runnerId = $userId;
-        } else {
-            $ownerId  = $context->ownerUserId ?? $userId;
-            $runnerId = $context->runnerUserId ?? $userId;
-        }
+        // `?->` / `??` so a null context degrades to an unattributed call
+        // instead of a fatal Error on 8.4 / silent coercion on 8.5.
+        $ownerId  = $context?->ownerUserId;
+        $runnerId = $context->runnerUserId ?? $ownerId;
 
         $operation = (string) ($arguments['action'] ?? 'generate');
         return match ($operation) {
