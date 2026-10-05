@@ -70,13 +70,9 @@ final class MuseImageGenerationTool extends AbstractTool
         $this->logger = $logger;
     }
 
-    /**
-     * @param int|null $userId @deprecated pass $context->ownerUserId instead; removed from the interface in core 0.30.0.
-     */
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
