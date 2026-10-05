@@ -6,7 +6,7 @@ compatibility: spora>=0.24 spora-plugin-muse>=0.1
 metadata:
   author: spora-ai
   version: "0.1"
-allowed-tools: Spora\Plugins\Muse\Tools\MuseImageGenerationTool
+allowed-tools: image_muse
 ---
 
 # Muse Image
