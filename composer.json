@@ -43,18 +43,6 @@
             "spora-ai/installer": true
         }
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../spora-core",
-            "options": {
-                "symlink": true,
-                "versions": {
-                    "spora-ai/spora-core": "0.30.0"
-                }
-            }
-        }
-    ],
-    "minimum-stability": "dev",
+    "minimum-stability": "stable",
     "prefer-stable": true
 }
