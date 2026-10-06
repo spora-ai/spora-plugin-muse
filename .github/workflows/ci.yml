@@ -15,6 +15,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # core 0.30.0 removes `?int $userId` from `ToolInterface::execute()`, and
+  # that release is not on Packagist yet — v0.29.0 is still the newest tag and
+  # declares the five-parameter signature. A mismatch is fatal at class-load in
+  # BOTH directions, so this branch cannot be verified against a tagged core at
+  # all: against v0.29.0 every job dies with "Declaration of
+  # MuseImageGenerationTool::execute() must be compatible with
+  # ToolInterface::execute()". composer.json therefore resolves spora-core
+  # through a `path` repository (see its `repositories` entry, whose
+  # `options.versions` pins the version so the constraint is stable whichever
+  # ref is checked out) and CI checks core out as a sibling. Once core tags the
+  # release carrying the four-parameter signature, delete the `repositories`
+  # entry, restore `minimum-stability: stable`, drop `|| @dev` from the core
+  # constraint, and every job goes back to a plain `composer install`.
+  #
+  # `actions/checkout`'s `path:` is workspace-relative, so the core checkout
+  # lands inside this repo's workspace while the path repository is declared
+  # as `../spora-core` — a sibling, which is what local development has. Every
+  # job that installs therefore symlinks the checkout to the sibling location
+  # first; without it they fail with `Source path "../spora-core" is not
+  # found`.
+  #
+  # `main` is the ref the change landed on (core #288). A SHA pin would be
+  # tighter but would need a manual bump for every core fix this plugin is
+  # meant to inherit.
+  SPORA_CORE_REF: main
+
 jobs:
   test:
     name: Pest (PHP ${{ matrix.php }})
@@ -40,6 +67,16 @@ jobs:
         # conversion. Required by MuseTranscribeProviderTest happy paths.
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
+      - name: Checkout spora-core (path repository)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: spora-ai/spora-core
+          ref: ${{ env.SPORA_CORE_REF }}
+          path: spora-core
+
+      - name: Link spora-core to the sibling path the lock expects
+        run: ln -sfn "$GITHUB_WORKSPACE/spora-core" "$GITHUB_WORKSPACE/../spora-core"
+
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
@@ -60,6 +97,16 @@ jobs:
           coverage: none
           tools: composer
 
+      - name: Checkout spora-core (path repository)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: spora-ai/spora-core
+          ref: ${{ env.SPORA_CORE_REF }}
+          path: spora-core
+
+      - name: Link spora-core to the sibling path the lock expects
+        run: ln -sfn "$GITHUB_WORKSPACE/spora-core" "$GITHUB_WORKSPACE/../spora-core"
+
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
@@ -79,6 +126,16 @@ jobs:
           php-version: '8.4'
           coverage: none
           tools: composer
+
+      - name: Checkout spora-core (path repository)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: spora-ai/spora-core
+          ref: ${{ env.SPORA_CORE_REF }}
+          path: spora-core
+
+      - name: Link spora-core to the sibling path the lock expects
+        run: ln -sfn "$GITHUB_WORKSPACE/spora-core" "$GITHUB_WORKSPACE/../spora-core"
 
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
