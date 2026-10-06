@@ -43,7 +43,7 @@ jobs:
       - name: Resolve spora-core from Packagist
         # `update` (not `install`) so CI resolves the declared `>=0.30.0 <2.0.0`
         # floor against the real release instead of a pinned local checkout.
-        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Run Pest
         run: ./vendor/bin/pest
@@ -65,7 +65,7 @@ jobs:
       - name: Resolve spora-core from Packagist
         # `update` (not `install`) so CI resolves the declared `>=0.30.0 <2.0.0`
         # floor against the real release instead of a pinned local checkout.
-        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress
@@ -87,7 +87,7 @@ jobs:
       - name: Resolve spora-core from Packagist
         # `update` (not `install`) so CI resolves the declared `>=0.30.0 <2.0.0`
         # floor against the real release instead of a pinned local checkout.
-        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Check code style
         # Same ruleset as Spora core's .php-cs-fixer.php so plugin style matches host.
