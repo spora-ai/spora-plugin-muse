@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8ff909121424db8ed3784dd26127cf7b",
+    "content-hash": "321bee5602fb7f0c863c3672cf802440",
     "packages": [
         {
             "name": "brick/math",
@@ -10167,9 +10167,7 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": {
-        "spora-ai/spora-core": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
