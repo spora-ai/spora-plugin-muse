@@ -124,7 +124,7 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
             ?LoggerInterface $logger,
         ): MuseImageArchiveResolver {
             return new MuseImageArchiveResolver(
-                static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId),
+                static fn(string $id, ?int $runnerUserId): ?array => $reader->readAsset($id, $runnerUserId),
                 $logger,
             );
         });

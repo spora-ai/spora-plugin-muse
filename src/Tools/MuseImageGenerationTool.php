@@ -70,6 +70,15 @@ final class MuseImageGenerationTool extends AbstractTool
         $this->logger = $logger;
     }
 
+    /**
+     * Dispatch on the `action` argument. Reads the owner (whose saved
+     * key pays for the call) and the runner (whose Media Archive
+     * assets are readable) from `$context` — core 0.30.0 removed the
+     * legacy fifth `$userId` parameter, which always held the same
+     * value as `$context->ownerUserId`.
+     *
+     * @param array<string, mixed> $arguments
+     */
     public function execute(
         array $arguments,
         int $agentId,

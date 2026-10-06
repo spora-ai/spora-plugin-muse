@@ -56,11 +56,17 @@ final class MuseImageArchiveResolver
     private const MAX_RAW_BYTES = 20 * 1024 * 1024;
 
     /**
-     * @param Closure(string $id, ?int $userId): ?array $reader
+     * @param Closure(string $id, ?int $runnerUserId): ?array $reader
      *        Closure into the host's `MediaAssetReader::readAsset()` —
      *        see {@see \Spora\Services\MediaArchive\MediaAssetReader::readAsset()}
      *        for the return shape (`{status, bytes, mime}` or
      *        `{status, sourceUrl}` or `null`).
+     *
+     *        Core names that service's second argument `$userId`; the plugin
+     *        calls the value it passes `$runnerUserId` because it is the user
+     *        who triggered the task — the Media Archive ownership check asks
+     *        "who is asking", not "whose key pays". The wire value is
+     *        unchanged.
      */
     public function __construct(
         private readonly Closure $reader,
@@ -73,14 +79,17 @@ final class MuseImageArchiveResolver
      * data URIs) pass through untouched.
      *
      * @param  array<string, mixed> $arguments
+     * @param  int|null             $runnerUserId User the ownership check
+     *                                          runs against, or null for the
+     *                                          system-context bypass.
      * @return array{resolved: array<string, mixed>}|array{failed: ToolResult}
      */
-    public function resolve(array $arguments, ?int $userId): array
+    public function resolve(array $arguments, ?int $runnerUserId): array
     {
         if (!$this->hasResolvableImages($arguments)) {
             return ['resolved' => $arguments];
         }
-        return $this->buildResolvedArguments($arguments, $userId);
+        return $this->buildResolvedArguments($arguments, $runnerUserId);
     }
 
     /**
@@ -97,7 +106,7 @@ final class MuseImageArchiveResolver
      * @param  array<string, mixed> $arguments
      * @return array{resolved: array<string, mixed>}|array{failed: ToolResult}
      */
-    private function buildResolvedArguments(array $arguments, ?int $userId): array
+    private function buildResolvedArguments(array $arguments, ?int $runnerUserId): array
     {
         $replaced = [];
         foreach ($arguments['input_images'] as $entry) {
@@ -105,7 +114,7 @@ final class MuseImageArchiveResolver
                 $replaced[] = $entry;
                 continue;
             }
-            $outcome = $this->resolveOne($entry, $userId);
+            $outcome = $this->resolveOne($entry, $runnerUserId);
             if (isset($outcome['failed'])) {
                 return ['failed' => $outcome['failed']];
             }
@@ -119,14 +128,14 @@ final class MuseImageArchiveResolver
     /**
      * @return array{resolved: string}|array{failed: ToolResult}
      */
-    private function resolveOne(string $entry, ?int $userId): array
+    private function resolveOne(string $entry, ?int $runnerUserId): array
     {
         $uuid = $this->extractUuid($entry);
         if ($uuid === null) {
             return ['resolved' => $entry];
         }
 
-        $result = ($this->reader)($uuid, $userId);
+        $result = ($this->reader)($uuid, $runnerUserId);
         if ($result === null) {
             return ['failed' => $this->notFoundFailure($uuid)];
         }

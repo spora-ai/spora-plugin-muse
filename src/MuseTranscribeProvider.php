@@ -218,15 +218,24 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
         return is_string($apiKey) && trim($apiKey) !== '';
     }
 
+    /**
+     * {@see SpeechToTextProviderInterface::transcribe()} implementation.
+     * The interface still names its last argument `$userId`; this
+     * implementation calls it `$ownerUserId` because that is what it is —
+     * the cascade principal for `ToolConfigService::getEffectiveSettings()`,
+     * i.e. the user whose saved settings hold the API key. Core's
+     * `SpeechTranscribeController` calls this positionally, so the rename
+     * is source-compatible.
+     */
     public function transcribe(
         string $bytes,
         string $mimeType,
         ?string $languageHint = null,
         ?int $agentId = null,
-        ?int $userId = null,
+        ?int $ownerUserId = null,
     ): TranscriptionResult {
         $settings = $this->boundSettings
-            ?? $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
+            ?? $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $ownerUserId);
 
         $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
         if ($apiKey === '') {
