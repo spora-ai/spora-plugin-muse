@@ -11,16 +11,16 @@ defined('TEST_DATA_URI_PNG_PREFIX') || define('TEST_DATA_URI_PNG_PREFIX', 'data:
 
 function makeResolver(?Closure $reader = null): MuseImageArchiveResolver
 {
-    $fallback = static fn(string $id, ?int $userId): array => ['status' => 'not_found'];
+    $fallback = static fn(string $id, ?int $runnerUserId): array => ['status' => 'not_found'];
     return new MuseImageArchiveResolver($reader ?? $fallback);
 }
 
 test('bare UUID resolves to an inline data URI for data_url payloads', function (): void {
     $uuid = TEST_UUID;
     $png = "\x89PNG\r\n\x1a\n" . str_repeat('x', 64);
-    $resolver = makeResolver(static function (string $id, ?int $userId) use ($uuid, $png): array {
+    $resolver = makeResolver(static function (string $id, ?int $runnerUserId) use ($uuid, $png): array {
         expect($id)->toBe($uuid);
-        expect($userId)->toBe(42);
+        expect($runnerUserId)->toBe(42);
         return ['status' => 'data_url', 'bytes' => $png, 'mime' => TEST_MIME_PNG];
     });
 

@@ -47,7 +47,7 @@ test('generate posts to /v1/images/generations and returns the b64 image', funct
     ]);
 
     [$tool, $response] = buildImageTool($body);
-    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
     expect($result)->toBeInstanceOf(ToolResult::class)
         ->and($result->success)->toBeTrue()
@@ -66,7 +66,6 @@ test('generate sends {model, prompt, size} on the body, never an image_config wr
     $tool->execute(
         ['action' => 'generate', 'prompt' => 'a tall cat', 'size' => '1024x1536'],
         agentId: 1,
-        userId: 1,
     );
 
     $options = $response->getRequestOptions();
@@ -88,7 +87,7 @@ test('generate honours the model ToolSetting (operator-overridable model name)',
         'api_key' => 'sk-test',
         'model'   => 'meta/muse-image-1.0',
     ]);
-    $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
+    $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
     $options = $response->getRequestOptions();
     $json = json_decode((string) ($options['body'] ?? ''), true);
@@ -103,7 +102,7 @@ test('generate falls back to the default model when the setting is empty or whit
             'api_key' => 'sk-test',
             'model'   => $empty,
         ]);
-        $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
+        $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
         $options = $response->getRequestOptions();
         $json = json_decode((string) ($options['body'] ?? ''), true);
@@ -118,7 +117,6 @@ test('generate normalises an unknown size to 1024x1024', function (): void {
     $tool->execute(
         ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT, 'size' => '9999x9999'],
         agentId: 1,
-        userId: 1,
     );
 
     $options = $response->getRequestOptions();
@@ -162,7 +160,6 @@ test('edit posts to /v1/images/edits with images[] on the body, not messages', f
             'input_images' => [TEST_SEED_URL, TEST_DATA_URI_PNG_PREFIX . 'AAA'],
         ],
         agentId: 1,
-        userId: 1,
     );
 
     expect($result->success)->toBeTrue();
@@ -202,7 +199,6 @@ test('edit resolves a Media Archive UUID into an inline data URI on the wire', f
     $tool->execute(
         ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => [$uuid]],
         agentId: 1,
-        userId: 1,
     );
 
     $options = $response->getRequestOptions();
@@ -224,7 +220,6 @@ test('edit surfaces a failed ToolResult when a UUID does not resolve', function 
     $result = $tool->execute(
         ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => ['00000000-0000-0000-0000-000000000000']],
         agentId: 1,
-        userId: 1,
     );
 
     expect($result->success)->toBeFalse()
@@ -292,7 +287,7 @@ test('renderResponse labels the heading with the correct verb per operation', fu
         $callArgs = $action === 'edit'
             ? ['action' => 'edit', 'prompt' => TEST_PROMPT_SUNSET, 'input_images' => [TEST_SEED_URL]]
             : ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT];
-        $result = $tool->execute($callArgs, agentId: 1, userId: 1);
+        $result = $tool->execute($callArgs, agentId: 1);
 
         expect($result->success)->toBeTrue()
             ->and($result->content)->toContain("{$verb} image —");
@@ -310,7 +305,6 @@ test('execute tolerates a null PrincipalContext (PHP 8.4 + 8.5)', function (): v
     $result = $tool->execute(
         ['action' => 'generate', 'prompt' => TEST_PROMPT_CAT],
         agentId: 1,
-        userId: 1,
         context: null,
     );
 
@@ -346,7 +340,7 @@ test('archive() returns a data URI when MediaArchiveService throws (failure is l
     $tool = new MuseImageGenerationTool($config, $mock, $logger);
     $tool->setMediaArchive($archive);
 
-    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1, userId: 1);
+    $result = $tool->execute(['action' => 'generate', 'prompt' => TEST_PROMPT_CAT], agentId: 1);
 
     expect($result->success)->toBeTrue()
         ->and($result->data['image_urls'][0])->toStartWith(TEST_DATA_URI_PNG_PREFIX);
