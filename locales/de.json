@@ -8,5 +8,7 @@
   "Meta model identifier for speech-to-text. Default `muse-voice-transcribe-1.0` (current). Override to use a predecessor model Meta has shipped against the same API (rolling back after a bad release, A/B testing, etc.).": "Meta-Modellkennung für Speech-to-Text. Standard ist `muse-voice-transcribe-1.0` (aktuell). Überschreiben, um ein Vorgängermodell zu verwenden, das Meta gegen dieselbe API ausgeliefert hat (Zurückrollen nach einem schlechten Release, A/B-Tests usw.).",
   "PUSH_TO_TALK (single-turn, default), ENDPOINTING (turn boundaries), or DIARIZATION (speaker labels).": "PUSH_TO_TALK (einzeilig, Standard), ENDPOINTING (Turn-Grenzen) oder DIARIZATION (Sprecherkennzeichnungen).",
   "Biases recognition toward the picked languages. Supports code-switching — pick every language a session may produce. Meta Muse supports 25 languages total.": "Die Erkennung auf die gewählten Sprachen ausrichten. Unterstützt Code-Switching — wählen Sie jede Sprache, die eine Sitzung hervorbringen kann. Meta Muse unterstützt insgesamt 25 Sprachen.",
-  "Comma-separated list of terms to bias recognition toward (product names, jargon). e.g. Spora, Muse, Sporadise": "Kommagetrennte Liste von Begriffen, auf die die Erkennung ausgerichtet wird (Produktnamen, Fachbegriffe). z. B. Spora, Muse, Sporadise"
+  "Comma-separated list of terms to bias recognition toward (product names, jargon). e.g. Spora, Muse, Sporadise": "Kommagetrennte Liste von Begriffen, auf die die Erkennung ausgerichtet wird (Produktnamen, Fachbegriffe). z. B. Spora, Muse, Sporadise",
+  "Edit image(s) with prompt: '{$prompt}'": "Bild(er) mit Prompt bearbeiten: '{$prompt}'",
+  "Generate image for prompt: '{$prompt}'": "Bild für Prompt erzeugen: '{$prompt}'"
 }
