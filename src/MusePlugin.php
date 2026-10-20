@@ -138,4 +138,34 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
                 ->method('setLogger', $logger),
         ]);
     }
+
+    /**
+     * Translation catalogues this plugin ships, declared through
+     * {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
+     *
+     * Keys are the English source text — `de.json` reads
+     * `{"Muse Image": "Muse-Bild"}`, not `{"tool": "…"}`. That is what
+     * makes the host's `i18n:check` able to fail when a string is edited
+     * without being re-translated: the key changes and the old entry
+     * orphans.
+     *
+     * **Only operator copy belongs in here.** A string the model reads is
+     * never translated, which for this plugin means `#[Tool].description`,
+     * every `#[ToolOperation].description`, every `#[ToolParameter].description`,
+     * every `#[ToolSetting].label` and its `options`, and all `ToolResult`
+     * content. `locales/de.json` holds the `#[Tool].displayName` and the
+     * nine `#[ToolSetting].description` values — three on the image tool,
+     * six on the speech provider — and nothing else.
+     *
+     * Requires `spora-core >= 0.31.0` at runtime; older versions fail to
+     * resolve the method when the loader is strict.
+     *
+     * @return string[]
+     */
+    public function translationsPaths(): array
+    {
+        return [
+            __DIR__ . '/../locales',
+        ];
+    }
 }
