@@ -9,7 +9,7 @@
   "PUSH_TO_TALK (single-turn, default), ENDPOINTING (turn boundaries), or DIARIZATION (speaker labels).": "PUSH_TO_TALK (einzeilig, Standard), ENDPOINTING (Turn-Grenzen) oder DIARIZATION (Sprecherkennzeichnungen).",
   "Biases recognition toward the picked languages. Supports code-switching — pick every language a session may produce. Meta Muse supports 25 languages total.": "Die Erkennung auf die gewählten Sprachen ausrichten. Unterstützt Code-Switching — wählen Sie jede Sprache, die eine Sitzung hervorbringen kann. Meta Muse unterstützt insgesamt 25 Sprachen.",
   "Comma-separated list of terms to bias recognition toward (product names, jargon). e.g. Spora, Muse, Sporadise": "Kommagetrennte Liste von Begriffen, auf die die Erkennung ausgerichtet wird (Produktnamen, Fachbegriffe). z. B. Spora, Muse, Sporadise",
-  "Edit image(s) with prompt: '{$prompt}'": "Bild(er) mit Prompt bearbeiten: '{$prompt}'",
-  "Generate image for prompt: '{$prompt}'": "Bild für Prompt erzeugen: '{$prompt}'",
+  "Edit image(s) with prompt: '%s'": "Bild(er) mit Prompt bearbeiten: '%s'",
+  "Generate image for prompt: '%s'": "Bild für Prompt erzeugen: '%s'",
   "Meta Muse vendor home — speech-to-text + image generation today; future Muse Spark text, Muse Glimmer TTS, etc.": "Heimat von Meta Muse — heute Speech-to-Text und Bildgenerierung; künftig Muse Spark Text, Muse Glimmer TTS und mehr."
 }

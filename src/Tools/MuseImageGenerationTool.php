@@ -101,9 +101,10 @@ final class MuseImageGenerationTool extends AbstractTool
     {
         $operation = (string) ($arguments['action'] ?? 'generate');
         $prompt = mb_substr(trim((string) ($arguments['prompt'] ?? '')), 0, 80);
+
         return match ($operation) {
-            'edit'  => "Edit image(s) with prompt: '{$prompt}'",
-            default => "Generate image for prompt: '{$prompt}'",
+            'edit'  => sprintf("Edit image(s) with prompt: '%s'", $prompt),
+            default => sprintf("Generate image for prompt: '%s'", $prompt),
         };
     }
 

@@ -153,12 +153,15 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
      * never translated, which for this plugin means `#[Tool].description`,
      * every `#[ToolOperation].description`, every `#[ToolParameter].description`,
      * every `#[ToolSetting].label` and its `options`, and all `ToolResult`
-     * content. `locales/de.json` holds the `#[Tool].displayName` and the
-     * nine `#[ToolSetting].description` values — three on the image tool,
-     * six on the speech provider — and nothing else.
+     * content. What `locales/de.json` holds is the operator-facing copy:
+     * every tool's `displayName`, every `#[ToolSetting].description`, the
+     * `plugin.json` description, and the `describeAction()` strings — each
+     * a string only an operator ever reads.
      *
-     * Requires `spora-core >= 0.31.0` at runtime; older versions fail to
-     * resolve the method when the loader is strict.
+     * Needs a core that reads `translationsPaths()` — 0.31.0 and later. On
+     * 0.30.x nothing calls the method, so the catalogue is silently
+     * ignored and the copy stays English, which is the fallback every
+     * layer already uses.
      *
      * @return string[]
      */
