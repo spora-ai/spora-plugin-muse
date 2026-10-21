@@ -14,18 +14,9 @@ use Spora\Speech\SpeechToTextProviderInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Meta Muse vendor home — speech-to-text + image generation today.
- *
- * Contributes one STT provider ({@see MuseTranscribeProvider}, exposed
- * via the {@see speechToTextProviders()} data hook) and one image
- * generation tool ({@see MuseImageGenerationTool}, exposed via
- * {@see tools()}). The plugin entry point itself just declares the
- * contributions — all DI wiring lives on the provider / tool classes,
- * except for the {@see onContainerBuilding()} event below, which
- * PHP-DI needs help with for nullable ctor params + setter injection.
- *
- * Future Meta capabilities (Muse Spark text chat, Muse Glimmer TTS,
- * Muse Video) join under the same plugin home.
+ * The entry point only declares contributions — the DI wiring for the
+ * provider and the tool lives on those classes. The exception is
+ * {@see onContainerBuilding()}, which PHP-DI cannot infer.
  */
 final class MusePlugin extends AbstractPlugin implements EventSubscriberInterface
 {
@@ -48,10 +39,9 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
 
     /**
      * Plugin-shipped skills live as siblings under `<plugin>/skills/<slug>/SKILL.md`.
-     * Today: `muse-image` (canonical recipe for the image-generation tool).
      *
-     * `is_dir` guard keeps the override side-effect-free when the directory
-     * is absent (e.g. checkout without the `skills/` subtree).
+     * The `is_dir` guard keeps the hook side-effect-free when the subtree
+     * is absent (e.g. a checkout without `skills/`).
      *
      * @return string[]
      */
@@ -62,10 +52,8 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
     }
 
     /**
-     * Agent-template files for the Muse plugin. The scanner reads depth-0
-     * `.json` / `.yaml` / `.yml` files. Today: `muse-image-expert.json`
-     * (a single-purpose image-generation agent that loads the `muse-image`
-     * skill as its canonical recipe).
+     * Agent-template files for the Muse plugin. Core's scanner reads
+     * depth-0 `.json` / `.yaml` / `.yml` files.
      *
      * @return string[]
      */
@@ -77,14 +65,12 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
     }
 
     /**
-     * Subscribe to the framework's boot-time events.
-     *
-     * - {@see ContainerBuildingEvent} fires once per process, before the
-     *   DI container is built. {@see self::onContainerBuilding()} adds
-     *   the {@see MediaArchiveService} + {@see LoggerInterface} bindings
-     *   the tool needs via setter injection — without this, the tool
-     *   silently falls back to returning `data:` URIs and the chat UI
-     *   sanitizes them to `[data-omitted]`.
+     * {@see ContainerBuildingEvent} fires once per process, before the DI
+     * container is built. {@see self::onContainerBuilding()} adds the
+     * {@see MediaArchiveService} + {@see LoggerInterface} bindings the
+     * tool needs via setter injection — without them the tool falls back
+     * to `data:` URIs, which core's `ScrubDataUrls` replaces with the
+     * literal `[data-omitted]` before the result is stored.
      *
      * @return array<class-string, string>
      */
@@ -96,22 +82,23 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
     }
 
     /**
-     * PHP-DI quirk: nullable ctor params with `= null` defaults are
-     * short-circuited to null by DefaultValueResolver before the type-hint
-     * resolver runs, so the tool's optional `?LoggerInterface $logger`
-     * ctor param never gets autowired. `MediaArchiveService` and
+     * PHP-DI quirk: a nullable ctor param with a `= null` default is
+     * filled in by `DefaultValueResolver` before the type-hint resolver
+     * runs, so the tool's optional `?LoggerInterface $logger` ctor param
+     * never gets autowired. `MediaArchiveService` and
      * `MuseImageArchiveResolver` are not ctor params at all — they're
      * setters, which PHP-DI only calls if told to. All three need
      * explicit `\DI\autowire()->method(...)` wiring.
      *
-     * Without this, the tool renders inline images as raw `data:` URIs,
-     * the chat UI sanitizer truncates them to `[data-omitted]`, and the
-     * user sees a broken placeholder. With it, images land in the Media
-     * Archive and render as `/api/v1/assets/<token>.<ext>`.
+     * Without it the tool returns `data:` URIs, which core's
+     * `ScrubDataUrls` replaces with the literal `[data-omitted]` before
+     * the result is stored — the operator sees a broken image. With it,
+     * images land in the Media Archive and render as
+     * `/api/v1/assets/<uuid>.<ext>`.
      *
-     * The resolver needs a closure into the host's `MediaAssetReader` so
-     * the plugin stays decoupled from the `final` core service (matches
-     * the MiniMax plugin's pattern for the same reason).
+     * The resolver takes a closure into the host's `MediaAssetReader`
+     * rather than the type itself: the core class is `final`, so a plugin
+     * test cannot mock it — the closure is the seam.
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
@@ -140,28 +127,7 @@ final class MusePlugin extends AbstractPlugin implements EventSubscriberInterfac
     }
 
     /**
-     * Translation catalogues this plugin ships, declared through
-     * {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
-     *
-     * Keys are the English source text — `de.json` reads
-     * `{"Muse Image": "Muse-Bild"}`, not `{"tool": "…"}`. That is what
-     * makes the host's `i18n:check` able to fail when a string is edited
-     * without being re-translated: the key changes and the old entry
-     * orphans.
-     *
-     * **Only operator copy belongs in here.** A string the model reads is
-     * never translated, which for this plugin means `#[Tool].description`,
-     * every `#[ToolOperation].description`, every `#[ToolParameter].description`,
-     * every `#[ToolSetting].label` and its `options`, and all `ToolResult`
-     * content. What `locales/de.json` holds is the operator-facing copy:
-     * every tool's `displayName`, every `#[ToolSetting].description`, the
-     * `plugin.json` description, and the `describeAction()` strings — each
-     * a string only an operator ever reads.
-     *
-     * Needs a core that reads `translationsPaths()` — 0.31.0 and later. On
-     * 0.30.x nothing calls the method, so the catalogue is silently
-     * ignored and the copy stays English, which is the fallback every
-     * layer already uses.
+     * The plugin's `locales/` directory — one `<lang>.json` per language.
      *
      * @return string[]
      */

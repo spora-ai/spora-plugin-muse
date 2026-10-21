@@ -9,15 +9,12 @@ use Psr\Log\LoggerInterface;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Resolve Spora Media Archive UUIDs and opaque `/api/v1/assets/<uuid>.<ext>`
- * URLs in the `input_images` slot of the image-generation tool call into a
- * forwardable form before the request to Meta goes out.
+ * Resolves Media Archive UUIDs and opaque `/api/v1/assets/<uuid>.<ext>`
+ * URLs in the `input_images` slot into a form Meta can fetch.
  *
- * Pattern: the LLM discovers a Media Archive asset (e.g. via a previous
- * image generation in this session, or via `media:search`) and feeds the
- * UUID forward as `input_images: ["<uuid>"]`. The actual bytes never enter
- * the chat context — the resolver reads them server-side, base64-encodes
- * them, and replaces the slot with a `data:` URI in the same position.
+ * The LLM only ever holds the UUID: the bytes are read server-side,
+ * base64-encoded, and written back into the same slot as a `data:` URI,
+ * so they never enter the chat context.
  *
  * Three resolved forms (mirroring {@see \Spora\Services\MediaArchive\MediaAssetReader}):
  *   - `data_url` (DB BLOB) → `data:<mime>;base64,<payload>` (inlined)
@@ -26,32 +23,24 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                            Meta's `images/edits` endpoint fetches it server-side
  *                            only for http(s) URLs)
  *
- * For UUIDs that don't exist or aren't accessible to the caller, the
- * resolver returns a failed `ToolResult` with an LLM-actionable message
- * — surfacing the failure is the whole point: the LLM can self-correct
- * (generate a fresh image, paste a public URL, etc.) without retrying
- * with the same UUID.
- *
- * Size cap: 20 MB on the raw bytes (well under any plausible Meta image
- * size limit, and below the 50 MB data-URI ceiling the chat UI imposes
- * on inline blobs).
+ * A UUID that does not exist, or that the caller may not read, resolves
+ * to a failed `ToolResult` with an LLM-actionable message: the LLM can
+ * self-correct (generate a fresh image, paste a public URL) instead of
+ * retrying the same UUID.
  *
  * The reader is taken as a closure rather than a concrete service class
- * so the plugin can ship without depending on `MediaAssetReader` directly
- * (the host's `MediaAssetReader` is `final` and therefore hard to mock
- * from a plugin test). The plugin's
- * {@see MusePlugin::onContainerBuilding()} wraps the
- * in-container reader in a one-line closure.
+ * because the host's `MediaAssetReader` is `final` and therefore cannot
+ * be mocked from a plugin test.
  */
 final class MuseImageArchiveResolver
 {
     private const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
     /**
-     * Maximum raw byte size that always fits in a `data:` URI plus
-     * reasonable headroom for Meta's edit endpoint. Above this, the
-     * resolver returns a failure with a downscaling hint instead of
-     * trying to encode a multi-megabyte blob.
+     * Raw-byte ceiling for one reference image. Base64 is ~4/3 of its
+     * source, so this bounds what gets inlined into the request to Meta;
+     * above it the resolver fails with a hint to use a smaller image or a
+     * public URL, rather than encoding a multi-megabyte blob.
      */
     private const MAX_RAW_BYTES = 20 * 1024 * 1024;
 

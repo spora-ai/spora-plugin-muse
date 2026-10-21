@@ -26,7 +26,8 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *
  * Response shape (both endpoints): `{created, data: [{b64_json}], output_format, …}`.
  * `data[].b64_json` is the base64-encoded image bytes; we surface those
- * to the tool for ingest into the Media Archive.
+ * to the tool for ingest into the Media Archive. A `data[].url` variant
+ * arrives when `response_format: url` is requested and is not handled.
  *
  * Single-shot: every failure surfaces to the caller so the LLM can
  * adapt on retry (smaller size, fewer reference images, raise timeout).
@@ -136,7 +137,6 @@ final class MuseImageHttpClient
         return $decoded;
     }
 
-    /** @param mixed $decoded */
     private function errorMessage(mixed $decoded, int $status): string
     {
         if (is_array($decoded) && is_array($decoded['error'] ?? null) && is_string($decoded['error']['message'] ?? null)) {

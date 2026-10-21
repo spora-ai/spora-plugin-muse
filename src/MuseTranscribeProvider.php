@@ -35,9 +35,6 @@ use Throwable;
  *   - Response: `{sessionId, transcript, audioDurationMs, turns[]}`
  *     where `turns[]` is populated only when `mode` is `ENDPOINTING`
  *     or `DIARIZATION`.
- *
- * Cheaper than Mistral at scale ($0.18/hour of audio) and best English
- * streaming WER (3.06% on Artificial Analysis Sept 2026).
  */
 #[ToolSetting(
     key: 'api_key',
@@ -121,20 +118,18 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
     private const DEFAULT_FFMPEG = 'ffmpeg';
     private const DEFAULT_MODE = 'PUSH_TO_TALK';
 
-    // Non-promoted runtime state — the registry rebinds this between
-    // describe() calls so multi-tenant requests don't bleed labels.
-    // PHP forbids re-assigning a readonly property outside the constructor,
-    // so the class is declared `final` (not `final readonly`) to allow
-    // bindLabel() to mutate this single field. Constructor-promoted
-    // dependencies below are still never reassigned.
+    // Non-promoted runtime state — the registry rebinds this on every
+    // `describe()` call so multi-tenant requests don't bleed labels.
+    // A readonly property cannot be re-assigned, so the class is `final`
+    // rather than `final readonly` to let bindLabel() mutate this field.
     private ?string $boundDisplayName = null;
 
     /**
      * v2-cascade settings pushed by {@see bindSettings()}. `null` until
-     * the registry resolves a `SpeechProviderConfiguration` row for
-     * this provider class; the legacy `ToolConfigService` path is the
-     * fallback for that case (so operators who configured the key
-     * via the pre-PR-#238 `tool_user_settings` path keep working).
+     * the registry resolves a `SpeechProviderConfiguration` row for this
+     * provider class; the legacy `ToolConfigService` path is the fallback
+     * for that case, so operators who configured the key via the
+     * `tool_user_settings` path keep working.
      */
     private ?array $boundSettings = null;
 
@@ -154,10 +149,9 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
     }
 
     /**
-     * Cache the operator's per-config `display_name` ToolSetting. The
-     * registry calls this once per `describe()` invocation so subsequent
-     * {@see getDisplayName()} calls return the operator's label rather
-     * than the class-level default. Mirrors the pattern on
+     * Cache the operator's per-config `display_name` ToolSetting, so
+     * subsequent {@see getDisplayName()} calls return the operator's label
+     * rather than the class-level default. Mirrors
      * {@see \Spora\Speech\OpenAiCompatibleTranscriber::bindLabel()}.
      */
     public function bindLabel(string $label): void
@@ -171,11 +165,9 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
      * so {@see transcribe()} and {@see isConfigured()} consult the
      * `speech_provider_configurations` cascade — the single source of
      * truth post-{@see https://github.com/spora-ai/spora-core/pull/238 PR #238}.
-     * Falls back to `ToolConfigService` only when no bound settings
-     * are present (legacy v1 `tool_user_settings` operators keep
-     * working without an admin-side re-save). The registry resets
-     * the bound value on every `configuredProvider()` call so
-     * multi-tenant requests don't bleed settings across calls.
+     * Falls back to `ToolConfigService` only when no bound settings are
+     * present, so legacy v1 `tool_user_settings` operators keep working
+     * without an admin-side re-save.
      *
      * @param array<string, mixed> $settings
      */
@@ -199,14 +191,13 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
     }
 
     /**
-     * When bound settings are present (v2-cascade path), the gate is
-     * the `api_key` field — empty means the operator hasn't saved a key
-     * yet, and the registry filters the provider out so the transcribe
-     * endpoint returns 503 instead of throwing mid-call. The legacy
-     * optimistic default (defer to `transcribe()` for the real check)
-     * is kept for the no-bound-settings path so v1
-     * `tool_user_settings` operators keep working without an admin-side
-     * re-save.
+     * When bound settings are present (v2-cascade path), the gate is the
+     * `api_key` field — empty means the operator hasn't saved a key yet,
+     * and the registry filters the provider out so the transcribe endpoint
+     * returns 503 instead of throwing mid-call. The legacy optimistic
+     * default (defer to `transcribe()` for the real check) is kept for the
+     * no-bound-settings path, so v1 `tool_user_settings` operators keep
+     * working without an admin-side re-save.
      */
     public function isConfigured(): bool
     {
@@ -246,12 +237,6 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
         $mode = $this->readMode($settings);
         $model = $this->readModel($settings);
         $keywords = $this->readStringList($settings, 'keywords', ',');
-        // ToolConfigService::normalizeMultiSelectValues decodes the
-        // multi-select form's JSON string to an array before the provider
-        // reads settings. Mirror that path defensively so direct-API
-        // callers / unit tests that bypass the framework's normalization
-        // still see the right list (matches
-        // ToolConfigSchemaInspector::normalizeRawList's contract).
         $languageBias = $this->normalizeRawList($settings['language_bias'] ?? null);
 
         if (strlen($bytes) > self::MAX_BYTES) {
@@ -291,10 +276,10 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
 
     /**
      * Resolve the ffmpeg binary path. `getenv()` is the right read for
-     * shell-exported vars (e.g. `export SPORA_FFMPEG_BINARY=...` in the
-     * Sora service unit, which on PHP-FPM is what populates the per-pool
-     * environment). `$_ENV` is the right read for vars loaded by a
-     * `.env` loader such as vlucas/dotenv, which doesn't propagate to the
+     * shell-exported vars (e.g. `export SPORA_FFMPEG_BINARY=...` in a
+     * service unit, which on PHP-FPM is what populates the per-pool
+     * environment). `$_ENV` is the right read for vars loaded by a `.env`
+     * loader such as vlucas/dotenv, which does not propagate to the
      * OS-level getenv table. Falls back to `ffmpeg` on `$PATH`.
      */
     private function resolveFfmpegBinary(): string
@@ -491,11 +476,11 @@ final class MuseTranscribeProvider implements SpeechToTextProviderInterface
             file_put_contents($in, $bytes);
 
             // Resolve via ExecutableFinder so the missing-binary error fires
-            // before we spawn a process — Symfony's `proc_open` on macOS may
-            // return a handle even for non-existent binaries (the failure
-            // surfaces only at exit as opaque stderr, since Symfony's own
-            // fallback at vendor/symfony/process/Process.php retries with
-            // `exec <shell-command>` and still succeeds). ExecutableFinder
+            // before a process is spawned. With an array command `proc_open`
+            // returns false for a missing binary, and Symfony's own fallback
+            // then retries it as `exec <shell-command>` — the spawn succeeds,
+            // so the failure only shows up at exit as
+            // `exec: <binary>: not found` on stderr. ExecutableFinder
             // short-circuits this for both bare names on PATH and absolute
             // paths from `SPORA_FFMPEG_BINARY`.
             if ((new ExecutableFinder())->find($ffmpegBinary) === null) {

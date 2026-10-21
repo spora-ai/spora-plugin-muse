@@ -86,7 +86,7 @@ final class MuseImageGenerationTool extends AbstractTool
         ?PrincipalContext $context = null,
     ): ToolResult {
         // `?->` / `??` so a null context degrades to an unattributed call
-        // instead of a fatal Error on 8.4 / silent coercion on 8.5.
+        // instead of a warning for reading a property on null.
         $ownerId  = $context?->ownerUserId;
         $runnerId = $context->runnerUserId ?? $ownerId;
 
@@ -159,7 +159,6 @@ final class MuseImageGenerationTool extends AbstractTool
     /**
      * Resolve Media Archive UUIDs → inline data URIs (or forward external
      * source URLs) and drop empty/whitespace entries before the Meta call.
-     * Surfaces "asset not found" failures cleanly to the LLM.
      *
      * @param  array<string, mixed> $arguments
      * @return list<string>|ToolResult
@@ -226,8 +225,7 @@ final class MuseImageGenerationTool extends AbstractTool
     }
 
     /**
-     * Resolve the api_key + timeout from ToolConfigService; construct the
-     * HTTP client. Returns a failed {@see ToolResult} on missing key.
+     * Returns a failed {@see ToolResult} when no API key is configured.
      */
     private function resolveClient(int $agentId, ?int $ownerId): MuseImageHttpClient|ToolResult
     {
@@ -247,13 +245,8 @@ final class MuseImageGenerationTool extends AbstractTool
     }
 
     /**
-     * Walk the OpenAI-shaped images response and pull base64 image blocks.
-     *
-     * Response shape (both `/v1/images/generations` and `/v1/images/edits`):
-     *   - `data[].b64_json` — base64-encoded image bytes (default).
-     *   - `data[].url`     — temporary signed URL when `response_format: url`
-     *                        is requested (not surfaced today; we only
-     *                        handle the default `b64_json`).
+     * Turn the API response into the tool result. The response shape is
+     * documented on {@see MuseImageHttpClient}.
      *
      * @param array<string, mixed> $response
      * @param array<string, mixed> $arguments
@@ -279,6 +272,9 @@ final class MuseImageGenerationTool extends AbstractTool
         // into data: URI fallbacks inside `MuseImageArchiveService` so
         // the surrounding `execute()` never throws — ToolInterface
         // contractually forbids it.
+        //
+        // The service is built once and cached, so a `setMediaArchive()`
+        // that lands after the first render is not picked up.
         $archiveService = $this->archiveService ??= new MuseImageArchiveService(
             $this->logger,
             $this->mediaArchive,

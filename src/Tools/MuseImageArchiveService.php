@@ -12,22 +12,12 @@ use Spora\Services\MediaArchive\MediaIngestRequest;
 use Throwable;
 
 /**
- * Encapsulates the data-URI + Media Archive ingestion pipeline for
- * {@see MuseImageGenerationTool}. Lifted out of the tool to keep the
- * tool's method count under SonarQube's 20-per-class threshold.
+ * Turns one rendered image block into a Media Archive URL, falling back to
+ * a `data:` URI on any failure so the tool never violates
+ * {@see \Spora\Tools\ToolInterface::execute()}'s "MUST NOT throw" contract.
  *
- * Each rendered image block flows through {@see archiveBlock()} which
- * converts ingest failures (missing `MediaArchiveService`, transport
- * errors, malformed base64, etc.) into a fallback `data:` URI — the
- * tool can then return a successful {@see \Spora\Tools\ValueObjects\ToolResult}
- * without ever violating {@see \Spora\Tools\ToolInterface::execute()}'s
- * "MUST NOT throw" contract.
- *
- * The {@see MediaArchiveService} handle is taken via the constructor
- * so the {@see archiveBlock()} signature stays short (Sonar `php:S107`).
- * The tool constructs a fresh service on first use, so any subsequent
- * setter changes on the tool pick up at the next {@see archiveBlock()}
- * call.
+ * Lifted out of the tool to keep the tool's method count under
+ * SonarQube's 20-per-class limit (`php:S1448`).
  */
 final class MuseImageArchiveService
 {
@@ -42,7 +32,7 @@ final class MuseImageArchiveService
     /**
      * Convert one rendered image block to a public URL. On any failure
      * (transport, ingest, malformed bytes, even unexpected errors) the
-     * call still resolves to a `data:` URI so the surrounding tool
+     * call still resolves to a `data:` URI, so the surrounding tool
      * returns a successful {@see \Spora\Tools\ValueObjects\ToolResult}.
      */
     public function archiveBlock(
