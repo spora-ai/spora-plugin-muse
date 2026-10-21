@@ -14,15 +14,13 @@ use Symfony\Component\HttpClient\MockHttpClient;
  */
 function museCatalogue(): array
 {
-    /** @var array<string, string> $catalogue */
-    $catalogue = json_decode(
+    /** @var array<string, string> */
+    return json_decode(
         (string) file_get_contents(dirname(__DIR__, 3) . '/locales/de.json'),
         true,
         512,
         JSON_THROW_ON_ERROR,
     );
-
-    return $catalogue;
 }
 
 /**
