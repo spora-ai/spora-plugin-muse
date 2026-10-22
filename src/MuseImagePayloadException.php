@@ -7,14 +7,15 @@ namespace Spora\Plugins\Muse;
 use Throwable;
 
 /**
- * Thrown by {@see Tools\MuseImageGenerationTool} when
- * the base64-decoded image payload from Meta is malformed.
+ * Thrown by {@see Tools\MuseImageArchiveService} when the base64-decoded
+ * image payload from Meta is malformed.
  *
  * Subclasses {@see MuseImageException} (not {@see RuntimeException}
- * directly) so {@see Tools\MuseImageGenerationTool} can catch a single
- * `MuseImageException` and surface a failed {@see \Spora\Tools\ValueObjects\ToolResult}
- * instead of letting the exception escape {@see \Spora\Tools\ToolInterface::execute()},
- * which the ToolInterface contract forbids.
+ * directly) so the archive service can catch a single `MuseImageException`
+ * and surface a failed {@see \Spora\Tools\ValueObjects\ToolResult} instead
+ * of letting the exception escape
+ * {@see \Spora\Tools\ToolInterface::execute()}, which the ToolInterface
+ * contract forbids.
  */
 final class MuseImagePayloadException extends MuseImageException
 {

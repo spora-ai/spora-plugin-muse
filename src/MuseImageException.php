@@ -9,15 +9,14 @@ use Throwable;
 
 /**
  * Thrown by {@see MuseImageHttpClient} on every upstream failure
- * (transport timeout, non-2xx HTTP, non-JSON body). Carries the
- * current `http_timeout_seconds` so the error message can point the
- * LLM at the operator-configurable setting.
+ * (transport timeout, non-2xx HTTP, non-JSON body). Carries the current
+ * `http_timeout_seconds` so the error message can point the LLM at the
+ * operator-configurable setting.
  *
- * Not `final` — {@see MuseImagePayloadException} subclasses this so
- * the tool can catch a single `MuseImageException` and convert every
- * failure into a {@see \Spora\Tools\ValueObjects\ToolResult} without
- * violating {@see \Spora\Tools\ToolInterface::execute()}'s
- * "MUST NOT throw" contract.
+ * Not `final` — {@see MuseImagePayloadException} subclasses this so the
+ * tool can catch a single `MuseImageException` and convert every failure
+ * into a {@see \Spora\Tools\ValueObjects\ToolResult} without violating
+ * {@see \Spora\Tools\ToolInterface::execute()}'s "MUST NOT throw" contract.
  */
 class MuseImageException extends RuntimeException
 {
