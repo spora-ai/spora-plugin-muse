@@ -5,3 +5,6 @@
 /.worktrees/
 
 /tmp/
+
+# Coverage artefacts the SonarCloud scan job ingests.
+coverage/

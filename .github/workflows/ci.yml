@@ -32,7 +32,10 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: curl, mbstring
-          coverage: none
+          # The PHP 8.4 build also produces the coverage report and the
+          # JUnit XML that the SonarCloud scan job below ingests, so the
+          # coverage driver has to be on the runner.
+          coverage: pcov
           tools: composer
 
       - name: Install ffmpeg
@@ -46,7 +49,33 @@ jobs:
         run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Run Pest
-        run: ./vendor/bin/pest
+        # The PHP 8.4 build also produces the coverage report + JUnit XML
+        # so the SonarCloud scan job below has something to ingest: the
+        # Pest job writes clover.xml and junit.xml, which is what
+        # sonar-project.properties points at. PHP 8.5 runs the suite in
+        # plain mode — its purpose is to surface syntax / runtime diffs
+        # across PHP versions.
+        run: |
+          if [ "${{ matrix.php }}" = "8.4" ]; then
+            ./vendor/bin/pest \
+              --coverage-filter=src \
+              --coverage-clover=coverage/clover.xml \
+              --coverage-cobertura=coverage/cobertura.xml \
+              --coverage-html=coverage/html \
+              --log-junit=coverage/junit.xml
+          else
+            ./vendor/bin/pest
+          fi
+
+      - name: Upload coverage artifacts
+        # Only upload from the PHP 8.4 build — the 8.5 matrix sibling
+        # is identical source-wise and would race the upload step.
+        if: matrix.php == '8.4'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: pest-coverage
+          path: coverage/
+          retention-days: 7
 
   static-analysis:
     name: PHPStan
@@ -92,3 +121,138 @@ jobs:
       - name: Check code style
         # Same ruleset as Spora core's .php-cs-fixer.php so plugin style matches host.
         run: ./vendor/bin/php-cs-fixer fix --dry-run --diff --no-interaction
+
+  sonarcloud:
+    name: SonarCloud scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    needs: test
+    steps:
+      - name: Checkout
+        # fetch-depth: 0 so SonarCloud can attribute issues via git
+        # blame; without it the "new code" computation falls back to
+        # the last commit and skews coverage / quality gate.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: curl, mbstring
+          coverage: pcov
+          tools: composer
+
+      - name: Resolve spora-core from Packagist
+        # `update` (not `install`) so CI resolves the declared `>=0.30.0 <2.0.0`
+        # floor against the real release instead of a pinned local checkout.
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
+
+      - name: Download coverage report
+        # The Pest job writes coverage/clover.xml + coverage/junit.xml
+        # as workflow artifacts; pull them back so the scanner can
+        # ingest them as part of its own run.
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: pest-coverage
+          path: coverage
+
+      - name: Record scan start
+        id: scan-start
+        # The guard below accepts only an analysis SonarCloud published
+        # after this moment, so an entry left over from an earlier run of
+        # the same branch or pull request cannot make a broken scan look
+        # successful.
+        run: echo "started-at=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # v8.x of the SonarSource action exposes projectBaseDir as
+          # a dedicated input (sets -Dsonar.projectBaseDir internally);
+          # passing `--project-base-dir=...` via the args input makes
+          # the scanner CLI reject the flag.
+          projectBaseDir: ${{ github.workspace }}
+
+      - name: Assert an analysis landed
+        # The scan step above reports "ANALYSIS SUCCESSFUL" even when
+        # SonarCloud throws the report away: with Automatic analysis
+        # enabled on the project, the upload is accepted and no analysis
+        # is published. The job then goes green having measured nothing,
+        # which is the same failure as having no gate at all. This step
+        # asks SonarCloud what it actually stored and fails when the
+        # answer is "nothing".
+        #
+        # A push publishes its analysis on the branch and a pull request
+        # on the pull request, so the two are looked for in different
+        # places. A tag ref never gets an analysis at all — SonarCloud
+        # files the report under refs/tags/<tag> and publishes nothing —
+        # so the guard steps aside for tags.
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SCAN_STARTED_AT: ${{ steps.scan-start.outputs.started-at }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          COMMIT_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          API="https://sonarcloud.io/api"
+          PROJECT_KEY="$(sed -n 's/^sonar\.projectKey=//p' sonar-project.properties | head -1)"
+          DEADLINE=$(( $(date +%s) + 120 ))
+
+          if [ -z "${SONAR_TOKEN:-}" ]; then
+            echo "::error::SONAR_TOKEN is empty — the guard cannot ask SonarCloud what it stored."
+            exit 1
+          fi
+
+          if [ -z "$PROJECT_KEY" ]; then
+            echo "::error::sonar.projectKey is missing from sonar-project.properties."
+            exit 1
+          fi
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            echo "Tag push — SonarCloud publishes no analysis for a tag ref, nothing to assert."
+            exit 0
+          fi
+
+          published() {
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              curl -fsS -H "Authorization: Bearer $SONAR_TOKEN" \
+                "$API/project_pull_requests/list?project=$PROJECT_KEY" \
+                | jq --arg pr "$PR_NUMBER" --arg head "$PR_HEAD_SHA" --arg sha "$COMMIT_SHA" --argjson since "$SCAN_STARTED_AT" '
+                    [ .pullRequests[]?
+                      | select(.key == $pr)
+                      | select(.commit != null and (.commit.sha == $head or .commit.sha == $sha))
+                      | select(.analysisDate != null)
+                      | select((.analysisDate | sub("\\+0000$"; "Z") | fromdateiso8601) >= $since)
+                    ] | length'
+            else
+              curl -fsS -H "Authorization: Bearer $SONAR_TOKEN" \
+                "$API/project_analyses/search?project=$PROJECT_KEY&ps=100" \
+                | jq --arg sha "$COMMIT_SHA" '[ .analyses[]? | select(.revision == $sha) ] | length'
+            fi
+          }
+
+          while :; do
+            COUNT="$(published 2>/dev/null || echo 0)"
+            case "$COUNT" in
+              ''|*[!0-9]*) COUNT=0 ;;
+            esac
+            if [ "$COUNT" -gt 0 ]; then
+              echo "SonarCloud published an analysis for $COMMIT_SHA."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          echo "::error::No analysis for $COMMIT_SHA landed in $PROJECT_KEY. The scan reported success but SonarCloud stored nothing — with Automatic analysis enabled on this project it owns the analyses and discards the CI ones. Turn Automatic analysis off in the SonarCloud project settings."
+          exit 1
