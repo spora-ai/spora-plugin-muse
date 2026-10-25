@@ -106,3 +106,43 @@ it('keeps the German placeholders in step with the English template', function (
 
     expect($german[0])->toBe($english[0]);
 })->with(['generate', 'edit']);
+
+/**
+ * An approval prompt whose argument carries a line break.
+ *
+ * The host looks the rendered sentence up and matches it against the
+ * catalogue's `%s` templates. Its matcher builds `(.+?)` without the `s`
+ * (DOTALL) modifier, so an argument holding a newline never matched its
+ * template: `trans()` fell back to the English source and a German operator
+ * approved an English prompt. The `s` modifier lands in core, but the
+ * released core does not ship the translation layer at all — this plugin
+ * cannot exercise the host's matcher, let alone assert the German sentence.
+ *
+ * So this asserts the plugin's half of the contract, which is what the fix
+ * needs: the prompt is rendered from a template the catalogue carries, the
+ * German translation of that template carries the same placeholders, and the
+ * multi-line argument reaches the template's slot unchanged. With the `s`
+ * modifier the host then captures the whole argument and fills the German
+ * template.
+ *
+ * Once the core release with the DOTALL fix is out, assert the German
+ * sentence here: the host's `Translator::trans()` turns the rendered prompt
+ * into the catalogue's German template.
+ */
+it('carries a multi-line prompt into the approval prompt template the catalogue carries', function () {
+    $catalogue = museCatalogue();
+    $template = "Generate image for prompt: '%s'";
+    $german = $catalogue[$template] ?? '';
+    $prompt = "a red bicycle\non a wet street";
+
+    $description = buildMuseImageTool()->describeAction(['action' => 'generate', 'prompt' => $prompt]);
+
+    expect($catalogue)->toHaveKey($template)
+        ->and($german)->not->toBe('')
+        ->and($description)->toBe(sprintf($template, $prompt));
+
+    preg_match_all('/%[sd]/', $template, $english);
+    preg_match_all('/%[sd]/', $german, $germanSpecifiers);
+
+    expect($germanSpecifiers[0])->toBe($english[0]);
+});
