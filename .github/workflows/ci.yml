@@ -156,11 +156,11 @@ jobs:
 
       - name: Record the analysed commit's timestamp
         id: commit-time
-        # The guard below accepts an analysis carrying this commit's SHA
-        # that was published no earlier than the commit itself. The bound is
-        # the commit's timestamp, not the start of this run: SonarCloud's
-        # automatic analysis publishes minutes after the push — often before
-        # this workflow reaches the scan — and that analysis is asserted.
+        # The guard below accepts an analysis carrying this commit's SHA that
+        # was published no earlier than the commit itself. The bound is the
+        # commit's timestamp rather than the start of this run: the analysis
+        # is published by SonarCloud after it receives it, and the commit is
+        # the earliest moment that analysis can describe.
         run: |
           sha="${{ github.event.pull_request.head.sha || github.sha }}"
           committed_at="$(git log -1 --format=%ct "$sha" 2>/dev/null || true)"
@@ -170,12 +170,6 @@ jobs:
           echo "committed-at=$committed_at" >> "$GITHUB_OUTPUT"
 
       - name: SonarCloud Scan
-        id: scan
-        # SonarCloud refuses a CI analysis while Automatic analysis is enabled
-        # on the project — it owns the analyses and publishes them itself.
-        # That is a property of the SonarCloud project, not of this
-        # repository, so the step may fail and the guard below decides.
-        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -186,21 +180,12 @@ jobs:
           # reject the flag.
           projectBaseDir: ${{ github.workspace }}
 
-      - name: Report a scan that did not complete
-        # The scan is allowed to fail above, so this is where the failure
-        # goes on the open — the guard below is what fails the job; this
-        # warning names what has to change for this repository to publish
-        # its own analysis, coverage included.
-        if: steps.scan.outcome == 'failure'
-        run: |
-          echo "::warning::The SonarCloud scan did not complete. The usual cause is that Automatic analysis is enabled for this project on SonarCloud, which refuses CI analyses and publishes them itself. Turn Automatic analysis off in the SonarCloud project settings (Administration → General Settings) so that this workflow publishes the analysis together with this repository's coverage."
-
       - name: Assert an analysis landed
-        # The scan step above reports "ANALYSIS SUCCESSFUL" even when
-        # SonarCloud throws the report away: with Automatic analysis on the
-        # project, the upload is accepted and no analysis is published — the
-        # job would go green having measured nothing. This step asks
-        # SonarCloud what it stored and fails when the answer is "nothing".
+        # The scan step above can report success while SonarCloud stored
+        # nothing: with Automatic analysis enabled on the project the upload
+        # is accepted and no analysis is published — the job would go green
+        # having measured nothing. This step asks SonarCloud what it stored
+        # and fails when the answer is "nothing".
         #
         # A push publishes its analysis on the branch, a pull request on the
         # pull request, so the two are looked for in different places. A tag
