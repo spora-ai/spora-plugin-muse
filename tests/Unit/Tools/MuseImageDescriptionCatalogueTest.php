@@ -7,6 +7,8 @@ use Spora\Plugins\Muse\Tools\MuseImageGenerationTool;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpClient\MockHttpClient;
 
+const MUSE_PLACEHOLDER_PATTERN = '/%[sd]/';
+
 /**
  * The catalogue, English source text to German.
  *
@@ -101,8 +103,40 @@ it('keeps the German placeholders in step with the English template', function (
 
     expect($entry)->not->toBeNull("no catalogue entry for: {$description}");
 
-    preg_match_all('/%[sd]/', $entry['key'], $english);
-    preg_match_all('/%[sd]/', $entry['value'], $german);
+    preg_match_all(MUSE_PLACEHOLDER_PATTERN, $entry['key'], $english);
+    preg_match_all(MUSE_PLACEHOLDER_PATTERN, $entry['value'], $german);
 
     expect($german[0])->toBe($english[0]);
 })->with(['generate', 'edit']);
+
+/**
+ * The host matches the rendered sentence against the catalogue's `%s`
+ * templates with a `(.+?)` pattern and no DOTALL modifier, so an argument
+ * holding a newline never matched its template: `trans()` fell back to
+ * English and a German operator approved an English prompt. The `s`
+ * modifier lands in core, but the released core ships no translation
+ * layer, so this plugin cannot exercise the host's matcher and asserts
+ * only its own half — the prompt renders from a template the catalogue
+ * carries, the German template carries the same placeholders, and the
+ * multi-line argument reaches the slot unchanged.
+ *
+ * Once core ships the DOTALL fix, assert the German sentence too: the
+ * host's `Translator::trans()` fills the German template.
+ */
+it('carries a multi-line prompt into the approval prompt template the catalogue carries', function () {
+    $catalogue = museCatalogue();
+    $template = "Generate image for prompt: '%s'";
+    $german = $catalogue[$template] ?? '';
+    $prompt = "a red bicycle\non a wet street";
+
+    $description = buildMuseImageTool()->describeAction(['action' => 'generate', 'prompt' => $prompt]);
+
+    expect($catalogue)->toHaveKey($template)
+        ->and($german)->not->toBe('')
+        ->and($description)->toBe(sprintf($template, $prompt));
+
+    preg_match_all(MUSE_PLACEHOLDER_PATTERN, $template, $english);
+    preg_match_all(MUSE_PLACEHOLDER_PATTERN, $german, $germanSpecifiers);
+
+    expect($germanSpecifiers[0])->toBe($english[0]);
+});
