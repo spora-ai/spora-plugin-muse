@@ -8,8 +8,6 @@ $catalogDir = dirname(__DIR__, 2) . '/locales';
 $pluginRoot = dirname(__DIR__, 2);
 
 /**
- * Every English literal the plugin's own source writes, decoded.
- *
  * A catalogue key is the English source string byte for byte, so a key the
  * source no longer produces is an orphan — the copy edit that was never
  * re-translated. The literals are read through the tokenizer rather than
@@ -40,8 +38,7 @@ $sourceLiterals = function (string $root): array {
 
             $literal = substr($token[1], 1, -1);
 
-            // Single-quoted PHP escapes only `\'` and `\\`; a double-quoted
-            // one carries the full escape set.
+            // Single-quoted PHP escapes only `\'` and `\\`; double-quoted carries the full set.
             $literals[] = $token[1][0] === "'"
                 ? str_replace(['\\\\', "\\'"], ['\\', "'"], $literal)
                 : (string) stripcslashes($literal);

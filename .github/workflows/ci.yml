@@ -32,9 +32,8 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: curl, mbstring
-          # The PHP 8.4 build also produces the coverage report and the
-          # JUnit XML that the SonarCloud scan job below ingests, so the
-          # coverage driver has to be on the runner.
+          # The 8.4 build produces the coverage report and the JUnit XML
+          # the SonarCloud scan job below ingests, so it needs the driver.
           coverage: pcov
           tools: composer
 
@@ -49,12 +48,10 @@ jobs:
         run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Run Pest
-        # The PHP 8.4 build also produces the coverage report + JUnit XML
-        # so the SonarCloud scan job below has something to ingest: the
-        # Pest job writes clover.xml and junit.xml, which is what
-        # sonar-project.properties points at. PHP 8.5 runs the suite in
-        # plain mode — its purpose is to surface syntax / runtime diffs
-        # across PHP versions.
+        # The 8.4 run writes the coverage + JUnit artefacts the scan job
+        # ingests (clover.xml, junit.xml — what sonar-project.properties
+        # points at); 8.5 runs the suite plain, to surface syntax / runtime
+        # diffs across PHP versions.
         run: |
           if [ "${{ matrix.php }}" = "8.4" ]; then
             ./vendor/bin/pest \
@@ -68,8 +65,8 @@ jobs:
           fi
 
       - name: Upload coverage artifacts
-        # Only upload from the PHP 8.4 build — the 8.5 matrix sibling
-        # is identical source-wise and would race the upload step.
+        # Only upload from the 8.4 build — the 8.5 sibling is identical
+        # source-wise and would race the upload step.
         if: matrix.php == '8.4'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
@@ -129,9 +126,9 @@ jobs:
     needs: test
     steps:
       - name: Checkout
-        # fetch-depth: 0 so SonarCloud can attribute issues via git
-        # blame; without it the "new code" computation falls back to
-        # the last commit and skews coverage / quality gate.
+        # fetch-depth: 0 so SonarCloud can attribute issues via git blame;
+        # without it "new code" falls back to the last commit and skews
+        # the quality gate.
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
@@ -150,9 +147,8 @@ jobs:
         run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.30.0 floor against whatever Packagist actually serves, not replay a lock
 
       - name: Download coverage report
-        # The Pest job writes coverage/clover.xml + coverage/junit.xml
-        # as workflow artifacts; pull them back so the scanner can
-        # ingest them as part of its own run.
+        # Pull the artefacts the Pest job wrote back, so the scanner
+        # ingests them in its own run.
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: pest-coverage
@@ -160,12 +156,11 @@ jobs:
 
       - name: Record the analysed commit's timestamp
         id: commit-time
-        # The guard below accepts an analysis that carries this commit's SHA
-        # and was published no earlier than the commit itself. The bound is
-        # the commit's timestamp rather than the start of this run because
-        # SonarCloud's automatic analysis publishes its analysis a couple of
-        # minutes after the push — often before this workflow has even
-        # reached the scan — and that analysis is the one being asserted.
+        # The guard below accepts an analysis carrying this commit's SHA
+        # that was published no earlier than the commit itself. The bound is
+        # the commit's timestamp, not the start of this run: SonarCloud's
+        # automatic analysis publishes minutes after the push — often before
+        # this workflow reaches the scan — and that analysis is asserted.
         run: |
           sha="${{ github.event.pull_request.head.sha || github.sha }}"
           committed_at="$(git log -1 --format=%ct "$sha" 2>/dev/null || true)"
@@ -176,45 +171,41 @@ jobs:
 
       - name: SonarCloud Scan
         id: scan
-        # SonarCloud refuses a CI analysis outright while Automatic analysis
-        # is enabled on the project — it owns the analyses and publishes
-        # them itself. That is a property of the SonarCloud project, not of
-        # this repository, so the step is allowed to fail and the guard
-        # below decides what actually happened.
+        # SonarCloud refuses a CI analysis while Automatic analysis is enabled
+        # on the project — it owns the analyses and publishes them itself.
+        # That is a property of the SonarCloud project, not of this
+        # repository, so the step may fail and the guard below decides.
         continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          # v8.x of the SonarSource action exposes projectBaseDir as
-          # a dedicated input (sets -Dsonar.projectBaseDir internally);
-          # passing `--project-base-dir=...` via the args input makes
-          # the scanner CLI reject the flag.
+          # v8.x of the SonarSource action takes projectBaseDir as a
+          # dedicated input (it sets -Dsonar.projectBaseDir internally);
+          # passing `--project-base-dir=...` via `args` makes the CLI
+          # reject the flag.
           projectBaseDir: ${{ github.workspace }}
 
       - name: Report a scan that did not complete
-        # The scan is allowed to fail above, so this is where the failure is
-        # put in the open. The guard that follows still insists that an
-        # analysis landed; this warning names what has to change for this
-        # repository to publish its own analysis, coverage included.
+        # The scan is allowed to fail above, so this is where the failure
+        # goes on the open — the guard below is what fails the job; this
+        # warning names what has to change for this repository to publish
+        # its own analysis, coverage included.
         if: steps.scan.outcome == 'failure'
         run: |
           echo "::warning::The SonarCloud scan did not complete. The usual cause is that Automatic analysis is enabled for this project on SonarCloud, which refuses CI analyses and publishes them itself. Turn Automatic analysis off in the SonarCloud project settings (Administration → General Settings) so that this workflow publishes the analysis together with this repository's coverage."
 
       - name: Assert an analysis landed
         # The scan step above reports "ANALYSIS SUCCESSFUL" even when
-        # SonarCloud throws the report away: with Automatic analysis
-        # enabled on the project, the upload is accepted and no analysis
-        # is published. The job then goes green having measured nothing,
-        # which is the same failure as having no gate at all. This step
-        # asks SonarCloud what it actually stored and fails when the
-        # answer is "nothing".
+        # SonarCloud throws the report away: with Automatic analysis on the
+        # project, the upload is accepted and no analysis is published — the
+        # job would go green having measured nothing. This step asks
+        # SonarCloud what it stored and fails when the answer is "nothing".
         #
-        # A push publishes its analysis on the branch and a pull request
-        # on the pull request, so the two are looked for in different
-        # places. A tag ref never gets an analysis at all — SonarCloud
-        # files the report under refs/tags/<tag> and publishes nothing —
-        # so the guard steps aside for tags.
+        # A push publishes its analysis on the branch, a pull request on the
+        # pull request, so the two are looked for in different places. A tag
+        # ref never gets an analysis — SonarCloud files it under
+        # refs/tags/<tag> and publishes nothing — so the guard steps aside.
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           COMMITTED_AT: ${{ steps.commit-time.outputs.committed-at }}
