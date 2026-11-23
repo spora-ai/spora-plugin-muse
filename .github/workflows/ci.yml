@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.4', '8.5']
+        php: ['8.4', '8.5', '8.6']
     steps:
       - name: Checkout plugin
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -50,8 +50,8 @@ jobs:
       - name: Run Pest
         # The 8.4 run writes the coverage + JUnit artefacts the scan job
         # ingests (clover.xml, junit.xml — what sonar-project.properties
-        # points at); 8.5 runs the suite plain, to surface syntax / runtime
-        # diffs across PHP versions.
+        # points at). PHP 8.5 and 8.6 run the suite in plain mode — their
+        # purpose is to surface syntax / runtime diffs across PHP versions.
         run: |
           if [ "${{ matrix.php }}" = "8.4" ]; then
             ./vendor/bin/pest \
@@ -65,8 +65,8 @@ jobs:
           fi
 
       - name: Upload coverage artifacts
-        # Only upload from the 8.4 build — the 8.5 sibling is identical
-        # source-wise and would race the upload step.
+        # Only upload from the 8.4 build — the 8.5 and 8.6 siblings are
+        # identical source-wise and would race the upload step.
         if: matrix.php == '8.4'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
