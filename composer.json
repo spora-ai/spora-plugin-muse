@@ -15,7 +15,7 @@
         "friendsofphp/php-cs-fixer": "^3.94",
         "justinrainbow/json-schema": "^6.0",
         "mockery/mockery": "^1.6",
-        "pestphp/pest": "^4.0",
+        "pestphp/pest": "^5.0",
         "phpstan/phpstan": "^2.1",
         "phpstan/phpstan-mockery": "^2.0"
     },
